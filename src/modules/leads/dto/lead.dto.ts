@@ -8,6 +8,10 @@ export const CreateLeadListSchema = z.object({
     .string()
     .optional()
     .describe('Description or campaign target context'),
+  leadIds: z
+    .array(z.string())
+    .optional()
+    .describe('Initial contact/lead UUIDs to associate with this list'),
 });
 
 export class CreateLeadListDto extends createZodDto(CreateLeadListSchema) {}
@@ -22,6 +26,17 @@ export const CreateLeadSchema = z.object({
   linkedIn: z.string().optional().describe('LinkedIn profile URL'),
   city: z.string().optional().describe('City of residence'),
   country: z.string().optional().describe('Country code or name'),
+  leadScore: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe('Lead intent score (0-100)'),
+  tags: z
+    .array(z.string())
+    .optional()
+    .describe('Categorization tags'),
   customVariables: z
     .record(z.string(), z.any())
     .optional()
@@ -31,6 +46,15 @@ export const CreateLeadSchema = z.object({
 export class CreateLeadDto extends createZodDto(CreateLeadSchema) {}
 
 export const UpdateLeadSchema = z.object({
+  email: z.string().email('Invalid email format').optional().describe('Lead corporate email'),
+  firstName: z.string().optional().describe('First name'),
+  lastName: z.string().optional().describe('Last name'),
+  company: z.string().optional().describe('Company or organization name'),
+  jobTitle: z.string().optional().describe('Job title or role'),
+  website: z.string().optional().describe('Company website or homepage URL'),
+  linkedIn: z.string().optional().describe('LinkedIn profile URL'),
+  city: z.string().optional().describe('City of residence'),
+  country: z.string().optional().describe('Country code or name'),
   status: z
     .nativeEnum(LeadStatus)
     .optional()
@@ -39,6 +63,17 @@ export const UpdateLeadSchema = z.object({
     .nativeEnum(LeadVerificationStatus)
     .optional()
     .describe('Email verification deliverability state'),
+  leadScore: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe('Lead intent score (0-100)'),
+  tags: z
+    .array(z.string())
+    .optional()
+    .describe('Categorization tags'),
   customVariables: z
     .record(z.string(), z.any())
     .optional()

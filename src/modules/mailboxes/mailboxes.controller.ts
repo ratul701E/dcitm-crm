@@ -45,6 +45,13 @@ export class MailboxesController {
     return this.mailboxesService.findAll();
   }
 
+  @Get('warmup/matrix')
+  @ApiOperation({ summary: 'Get warmup progress matrix for all mailboxes' })
+  @ApiResponse({ status: 200, description: 'Warmup matrix retrieved' })
+  getWarmupMatrix() {
+    return this.mailboxesService.getWarmupMatrix();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get details of a specific mailbox' })
   @ApiParam({ name: 'id', description: 'Mailbox UUID' })
@@ -52,6 +59,32 @@ export class MailboxesController {
   @ApiResponse({ status: 404, description: 'Mailbox not found' })
   findOne(@Param('id') id: string) {
     return this.mailboxesService.findOne(id);
+  }
+
+  @Get(':id/config')
+  @ApiOperation({ summary: 'Get safe connection configuration for editing' })
+  @ApiParam({ name: 'id', description: 'Mailbox UUID' })
+  @ApiResponse({ status: 200, description: 'Safe configuration retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Mailbox not found' })
+  getConnectionConfig(@Param('id') id: string) {
+    return this.mailboxesService.getSafeConnectionConfig(id);
+  }
+
+  @Get(':id/warmup')
+  @ApiOperation({ summary: 'Get warmup plan for a specific mailbox' })
+  @ApiParam({ name: 'id', description: 'Mailbox UUID' })
+  @ApiResponse({ status: 200, description: 'Warmup plan retrieved' })
+  getWarmupPlan(@Param('id') id: string) {
+    return this.mailboxesService.getWarmupPlan(id);
+  }
+
+  @Patch(':id/warmup')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Update warmup plan for a specific mailbox' })
+  @ApiParam({ name: 'id', description: 'Mailbox UUID' })
+  @ApiResponse({ status: 200, description: 'Warmup plan updated' })
+  updateWarmupPlan(@Param('id') id: string, @Body() body: any) {
+    return this.mailboxesService.updateWarmupPlan(id, body);
   }
 
   @Patch(':id')
@@ -63,6 +96,15 @@ export class MailboxesController {
   @ApiResponse({ status: 404, description: 'Mailbox not found' })
   update(@Param('id') id: string, @Body() dto: UpdateMailboxDto) {
     return this.mailboxesService.update(id, dto);
+  }
+
+  @Post(':id/test-connection')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Test mailbox SMTP/OAuth connection' })
+  @ApiParam({ name: 'id', description: 'Mailbox UUID' })
+  @ApiResponse({ status: 200, description: 'Connection tested' })
+  testConnection(@Param('id') id: string) {
+    return this.mailboxesService.testConnection(id);
   }
 
   @Delete(':id')

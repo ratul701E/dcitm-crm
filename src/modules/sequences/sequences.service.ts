@@ -37,29 +37,41 @@ export class SequencesService {
   async addStep(campaignId: string, dto: CreateStepDto) {
     const sequence = await this.getSequenceByCampaign(campaignId);
 
-    // Validate that variants total weight is 100%
+    // Validate that variants exist
     if (!dto.variants || dto.variants.length === 0) {
       throw new BadRequestException('At least one email variant is required for a sequence step');
     }
-    const totalWeight = dto.variants.reduce((acc, v) => acc + v.weight, 0);
+
+    const stepOrder = dto.stepOrder ?? (dto as any).position ?? 1;
+    const variants = dto.variants.map((v, idx) => ({
+      ...v,
+      variantKey: v.variantKey || String.fromCharCode(65 + idx),
+      weight: v.weight ?? (dto.variants.length === 1 ? 100 : Math.floor(100 / dto.variants.length)),
+    }));
+
+    const totalWeight = variants.reduce((acc, v) => acc + (v.weight || 0), 0);
     if (totalWeight !== 100) {
-      throw new BadRequestException(
-        `Total weight of step variants must equal 100% (currently ${totalWeight}%)`,
-      );
+      if (variants.length === 1) {
+        variants[0].weight = 100;
+      } else {
+        throw new BadRequestException(
+          `Total weight of step variants must equal 100% (currently ${totalWeight}%)`,
+        );
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
       const step = await tx.sequenceStep.create({
         data: {
           sequenceId: sequence.id,
-          stepOrder: dto.stepOrder,
-          delayDays: dto.delayDays !== undefined ? dto.delayDays : 3,
+          stepOrder,
+          delayDays: dto.delayDays !== undefined ? dto.delayDays : 0,
           delayHours: dto.delayHours !== undefined ? dto.delayHours : 0,
         },
       });
 
       await tx.sequenceVariant.createMany({
-        data: dto.variants.map((v) => ({
+        data: variants.map((v) => ({
           sequenceStepId: step.id,
           variantKey: v.variantKey,
           weight: v.weight,
@@ -89,17 +101,26 @@ export class SequencesService {
 
     return this.prisma.$transaction(async (tx) => {
       if (dto.variants && dto.variants.length > 0) {
-        const totalWeight = dto.variants.reduce((acc, v) => acc + v.weight, 0);
+        const variants = dto.variants.map((v, idx) => ({
+          ...v,
+          variantKey: v.variantKey || String.fromCharCode(65 + idx),
+          weight: v.weight ?? (dto.variants!.length === 1 ? 100 : Math.floor(100 / dto.variants!.length)),
+        }));
+        const totalWeight = variants.reduce((acc, v) => acc + (v.weight || 0), 0);
         if (totalWeight !== 100) {
-          throw new BadRequestException(
-            `Total weight of step variants must equal 100% (currently ${totalWeight}%)`,
-          );
+          if (variants.length === 1) {
+            variants[0].weight = 100;
+          } else {
+            throw new BadRequestException(
+              `Total weight of step variants must equal 100% (currently ${totalWeight}%)`,
+            );
+          }
         }
 
         // Replace variants
         await tx.sequenceVariant.deleteMany({ where: { sequenceStepId: stepId } });
         await tx.sequenceVariant.createMany({
-          data: dto.variants.map((v) => ({
+          data: variants.map((v) => ({
             sequenceStepId: stepId,
             variantKey: v.variantKey,
             weight: v.weight,

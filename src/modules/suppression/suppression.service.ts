@@ -39,6 +39,7 @@ export class SuppressionService {
         isWildcard,
         reason: dto.reason,
         source: dto.source || 'manual',
+        notes: dto.notes || null,
       },
     });
 

@@ -12,6 +12,7 @@ import { MailboxesService } from '../mailboxes/mailboxes.service';
 import { PreSendGatekeeperService } from '../suppression/pre-send-gatekeeper.service';
 import { TrackingService } from '../tracking/tracking.service';
 import { UnsubscribeService } from '../suppression/unsubscribe.service';
+import { SpintaxService } from '../spintax/spintax.service';
 import { EmailDispatchStatus, LeadStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 
@@ -37,50 +38,85 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
     private readonly gatekeeper: PreSendGatekeeperService,
     private readonly trackingService: TrackingService,
     private readonly unsubscribeService: UnsubscribeService,
+    private readonly spintaxService: SpintaxService,
   ) {}
 
+  private isRedisConnected = false;
+
   onModuleInit() {
-    const connection = {
+    const connection: any = {
       host: this.configService.get<string>('REDIS_HOST', 'localhost'),
       port: this.configService.get<number>('REDIS_PORT', 6379),
+      username: this.configService.get<string>('REDIS_USERNAME') || undefined,
       password: this.configService.get<string>('REDIS_PASSWORD') || undefined,
     };
 
-    this.queue = new Queue('email-dispatch-queue', { connection });
-    this.queue.on('error', (err) => {
-      this.logger.warn(`Redis queue connection warning: ${err.message}`);
-    });
+    try {
+      this.queue = new Queue('email-dispatch-queue', { connection });
+      this.queue.on('error', (err) => {
+        this.isRedisConnected = false;
+        this.logger.warn(`Redis queue connection warning: ${err.message}`);
+      });
+      this.queue.waitUntilReady().then(() => {
+        this.isRedisConnected = true;
+        this.logger.log('Redis queue connection established successfully.');
+      }).catch((err: any) => {
+        this.isRedisConnected = false;
+        this.logger.warn(`Redis client connect error: ${err.message}`);
+      });
 
-    this.worker = new Worker(
-      'email-dispatch-queue',
-      async (job: Job<DispatchJobData>) => {
-        await this.processDispatchJob(job.data);
-      },
-      {
-        connection,
-        concurrency: 3, // Concurrency control per worker instance
-      },
-    );
-    this.worker.on('error', (err) => {
-      this.logger.warn(`Redis worker connection warning: ${err.message}`);
-    });
+      this.worker = new Worker(
+        'email-dispatch-queue',
+        async (job: Job<DispatchJobData>) => {
+          await this.processDispatchJob(job.data);
+        },
+        {
+          connection,
+          concurrency: 3,
+        },
+      );
+      this.worker.on('error', (err) => {
+        this.isRedisConnected = false;
+        this.logger.warn(`Redis worker connection warning: ${err.message}`);
+      });
+    } catch (err: any) {
+      this.isRedisConnected = false;
+      this.logger.warn(`Failed to initialize BullMQ (${err.message}). In-memory dispatch active.`);
+    }
   }
 
   /**
    * Schedules an outbound email job with calculated jitter delay
    */
   async enqueueDispatch(data: DispatchJobData, delayMs = 0) {
-    await this.queue.add('send-email', data, {
-      delay: delayMs,
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 5000,
-      },
-    });
+    if (this.isRedisConnected && this.queue) {
+      try {
+        await this.queue.add('send-email', data, {
+          delay: delayMs,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+        });
+        return;
+      } catch (err: any) {
+        this.logger.warn(`BullMQ queue.add failed (${err.message}). Running in-memory fallback.`);
+      }
+    }
+
+    // Direct in-process execution fallback
+    this.logger.log(`Dispatching email in-process (delay: ${delayMs}ms)...`);
+    setTimeout(async () => {
+      try {
+        await this.processDispatchJob(data);
+      } catch (err: any) {
+        this.logger.error(`In-process dispatch execution failed: ${err.message}`);
+      }
+    }, delayMs);
   }
 
-  private async processDispatchJob(data: DispatchJobData) {
+  public async processDispatchJob(data: DispatchJobData) {
     const { campaignId, leadId, sequenceStepId, sequenceVariantId, stepOrder } = data;
 
     // 1. Fetch Lead
@@ -89,27 +125,47 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
     });
     if (!lead) return;
 
-    // Check if lead has already replied, bounced, or unsubscribed
+    // Check if lead has bounced, unsubscribed, or is suppressed globally
     if (
-      lead.status === LeadStatus.REPLIED ||
       lead.status === LeadStatus.BOUNCED ||
       lead.status === LeadStatus.UNSUBSCRIBED ||
       lead.status === LeadStatus.SUPPRESSED
     ) {
+      this.logger.warn(`Lead ${lead.email} is in global terminal state (${lead.status}). Dropping dispatch.`);
+      await this.prisma.lead.update({ where: { id: lead.id }, data: { nextScheduledAt: null } }).catch(() => null);
+      return;
+    }
+
+    // Check if lead has already replied to THIS campaign specifically
+    const repliedInThisCampaign = await this.prisma.emailLog.findFirst({
+      where: {
+        campaignId,
+        leadId: lead.id,
+        inboundReplies: { some: {} },
+      },
+    });
+    if (repliedInThisCampaign) {
+      this.logger.log(`Lead ${lead.email} already replied to campaign ${campaignId}. Skipping.`);
+      await this.prisma.lead.update({ where: { id: lead.id }, data: { nextScheduledAt: null } }).catch(() => null);
       return;
     }
 
     // 2. Pre-Send Gatekeeper check (exact + wildcard domain suppression)
     const gateCheck = await this.gatekeeper.validateRecipient(lead.email, lead.id);
     if (!gateCheck.allowed) {
+      await this.prisma.lead.update({ where: { id: lead.id }, data: { nextScheduledAt: null } }).catch(() => null);
       return;
     }
 
-    // 3. Obtain assigned mailbox via least-recently-used pool rotation
+    // 3. Obtain best available mailbox for this campaign via LRU rotation
+    //    Re-check at execution time — another job may have consumed capacity since scheduling
     const mailbox = await this.mailboxesService.getAvailableMailboxForCampaign(campaignId);
     if (!mailbox) {
-      this.logger.warn(`No healthy mailbox available for campaign ${campaignId}. Re-queuing in 10 minutes...`);
-      await this.enqueueDispatch(data, 10 * 60 * 1000);
+      this.logger.warn(
+        `No mailbox with remaining capacity for campaign ${campaignId}. Re-queuing in 10 minutes.`,
+      );
+      // Re-queue without consuming a job attempt — wait for capacity to refresh
+      setTimeout(() => this.enqueueDispatch(data, 0).catch(() => null), 10 * 60 * 1000);
       return;
     }
 
@@ -143,16 +199,30 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    // 6. Inject open pixel & click proxy
+    // 6. Personalize Subject and Body per recipient at send time (keeping variant template unchanged)
+    const variables = this.spintaxService.buildVariableContext(lead, mailbox, campaign);
+    const personalizedSubject = this.spintaxService.render(variant.subject, variables);
+    const personalizedBody = this.spintaxService.render(variant.body, variables);
+
+    // 7. Format body to HTML paragraphs if it's plain text with newlines, then inject open pixel & click proxy
+    const hasHtmlBlocks = /<\/?(p|div|br|h[1-6]|table|ul|ol|li|blockquote|section)[^>]*>/i.test(personalizedBody);
+    const formattedHtmlBody = hasHtmlBlocks
+      ? personalizedBody
+      : personalizedBody
+          .replace(/\r\n/g, '\n')
+          .split(/\n\s*\n/)
+          .map((para) => `<p style="margin: 0 0 1em 0; line-height: 1.6;">${para.replace(/\n/g, '<br />')}</p>`)
+          .join('\n');
+
     const unsubscribeUrl = `http://localhost:${this.configService.get('PORT', 3000)}/api/suppression/unsubscribe?token=${this.unsubscribeService.generateUnsubscribeToken(lead.email, campaignId)}`;
     const finalHtml = this.trackingService.injectTracking(
-      variant.body,
+      formattedHtmlBody,
       emailLog.id,
       campaign.trackOpens,
       campaign.trackClicks,
     );
 
-    // 7. Check for parent thread for follow-up steps (In-Reply-To / References)
+    // 8. Check for parent thread for follow-up steps (In-Reply-To / References)
     let inReplyTo: string | undefined;
     let references: string | undefined;
     if (stepOrder > 1) {
@@ -170,19 +240,29 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 8. Decrypt mailbox credentials and dispatch
+    // 9. Decrypt mailbox credentials and dispatch with personalized content and formatted sender name
+    const senderDisplayName = mailbox.senderName || mailbox.displayName;
+    const fromAddress = senderDisplayName
+      ? `"${senderDisplayName}" <${mailbox.email}>`
+      : mailbox.email;
+
     try {
       const decryptedConfig = await this.mailboxesService.getDecryptedConfig(mailbox.id);
-      await this.adapters.dispatch(mailbox.type, decryptedConfig, {
+      const dispatchResult = await this.adapters.dispatch(mailbox.type, decryptedConfig, {
         to: lead.email,
-        from: mailbox.email,
-        subject: variant.subject,
+        from: fromAddress,
+        subject: personalizedSubject,
         html: finalHtml,
+        text: personalizedBody.replace(/<[^>]*>/g, ''),
         messageId,
         inReplyTo,
         references,
         unsubscribeUrl,
       });
+
+      if (!dispatchResult || !dispatchResult.success) {
+        throw new Error(dispatchResult?.error || 'Provider rejected email dispatch');
+      }
 
       // Update EmailLog
       await this.prisma.emailLog.update({
@@ -193,16 +273,17 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
-      // Increment mailbox daily count
+      // Increment mailbox daily & hourly counts
       await this.prisma.mailbox.update({
         where: { id: mailbox.id },
         data: {
           sentCountToday: { increment: 1 },
+          sentThisHour: { increment: 1 },
           lastSentAt: new Date(),
         },
       });
 
-      // Compute next step schedule for lead
+      // Compute next step for this campaign from the email logs (per-campaign progress)
       const nextStep = await this.prisma.sequenceStep.findFirst({
         where: {
           sequence: { campaignId },
@@ -211,24 +292,24 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (nextStep) {
+        // Schedule next step delivery
         const nextDate = new Date();
         nextDate.setDate(nextDate.getDate() + nextStep.delayDays);
         nextDate.setHours(nextDate.getHours() + nextStep.delayHours);
-
         await this.prisma.lead.update({
           where: { id: lead.id },
           data: {
             status: LeadStatus.IN_PROGRESS,
-            currentStepOrder: stepOrder + 1,
             nextScheduledAt: nextDate,
           },
         });
       } else {
-        // All sequence steps sent
+        // All steps for this campaign sent — set nextScheduledAt to null
+        // Do NOT mark COMPLETED globally so this lead remains eligible for other campaigns
         await this.prisma.lead.update({
           where: { id: lead.id },
           data: {
-            status: LeadStatus.COMPLETED,
+            status: LeadStatus.IN_PROGRESS,
             nextScheduledAt: null,
           },
         });
@@ -244,6 +325,12 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
           bounceReason: err.message,
         },
       });
+      await this.prisma.lead.update({
+        where: { id: lead.id },
+        data: {
+          nextScheduledAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minute backoff
+        },
+      }).catch(() => null);
       throw err; // Trigger BullMQ retry backoff
     }
   }

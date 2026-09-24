@@ -72,6 +72,13 @@ enum CampaignStatus {
   COMPLETED
 }
 
+enum DelayMode {
+  FIXED
+  UNIFORM_RANDOM
+  WEIGHTED_RANDOM
+  NATURAL
+}
+
 enum EmailDispatchStatus {
   PENDING
   SENT
@@ -120,6 +127,7 @@ model AuditLog {
   targetId     String?
   metadata     Json?
   ipAddress    String?
+  status       String   @default("success")
   createdAt    DateTime @default(now())
 
   @@index([actorUserId])
@@ -154,6 +162,12 @@ model Mailbox {
   domain             Domain       @relation(fields: [domainId], references: [id], onDelete: Cascade)
   type               MailboxType
   state              MailboxState @default(WARMING)
+  displayName        String?
+  senderName         String?
+  replyToEmail       String?
+  lastSyncAt         DateTime?
+  sentThisHour       Int          @default(0)
+  hourlyLimit        Int          @default(10)
   
   // Encrypted Credentials (stored via AES-256-GCM Vault)
   encryptedConfig    Json         // { ciphertext, iv, authTag }
@@ -170,6 +184,7 @@ model Mailbox {
   campaignMailboxes  CampaignMailbox[]
   emailLogs          EmailLog[]
   inboundReplies     InboundReply[]
+  warmupPlan         WarmupPlan?
 
   @@index([email])
   @@index([state])
@@ -179,6 +194,7 @@ model LeadList {
   id          String   @id @default(uuid())
   name        String
   description String?
+  isSystem    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -186,6 +202,7 @@ model LeadList {
   campaigns   CampaignLeadList[]
 
   @@index([name])
+  @@index([isSystem])
 }
 
 model Lead {
@@ -202,12 +219,15 @@ model Lead {
   city               String?
   country            String?
   customVariables    Json?                  // Flexible attributes (e.g. techStack, funding)
+  leadScore          Int                    @default(50)
+  tags               String[]               @default([])
   verificationStatus LeadVerificationStatus @default(UNVERIFIED)
   status             LeadStatus             @default(NEW)
   nextScheduledAt    DateTime?
   currentStepOrder   Int                    @default(1)
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
+  deletedAt          DateTime?
 
   emailLogs          EmailLog[]
   inboundReplies     InboundReply[]
@@ -216,6 +236,7 @@ model Lead {
   @@index([email])
   @@index([status])
   @@index([nextScheduledAt])
+  @@index([deletedAt])
 }
 
 model SuppressionEntry {
@@ -224,6 +245,7 @@ model SuppressionEntry {
   isWildcard Boolean           @default(false)
   reason     SuppressionReason
   source     String?           // e.g. "bounce_handler", "manual_import", "unsubscribe_link"
+  notes      String?
   createdAt  DateTime          @default(now())
 
   @@index([value])
@@ -234,11 +256,26 @@ model Campaign {
   id               String           @id @default(uuid())
   title            String
   status           CampaignStatus   @default(DRAFT)
+  campaignType     String           @default("outreach")
+  tags             String[]         @default([])
+  scheduledFor     DateTime?
+  replyToEmail     String?
+  excludedLeadListIds String[]      @default([])
+  retryOnSoftBounce Boolean         @default(true)
+  unsubscribeLinkEnabled Boolean    @default(true)
   targetTimezone   String           @default("UTC")
   dailyWindowStart String           @default("09:00") // HH:mm format
   dailyWindowEnd   String           @default("17:00") // HH:mm format
   activeDays       Int[]            @default([1, 2, 3, 4, 5]) // 1 = Mon, 7 = Sun
   maxNewLeadsPerDay Int             @default(50)
+  hourlyLimit      Int              @default(10)
+  minDelaySeconds  Int              @default(45)
+  delayMode            DelayMode        @default(WEIGHTED_RANDOM)
+  minimumDelaySeconds  Int              @default(10)
+  maximumDelaySeconds  Int?
+  randomSeed           String?
+  delaySequenceIndex   Int              @default(0)
+  nextAllowedSendAt    DateTime?
   trackOpens       Boolean          @default(true)
   trackClicks      Boolean          @default(true)
   
@@ -363,6 +400,9 @@ model InboundReply {
   bodyText     String?
   bodyHtml     String?
   category     ReplyCategory  @default(GENERAL)
+  isRead       Boolean        @default(false)
+  isStarred    Boolean        @default(false)
+  status       String         @default("active")
   receivedAt   DateTime       @default(now())
   createdAt    DateTime       @default(now())
 
@@ -392,3 +432,50 @@ model AnalyticsRollup {
   @@index([campaignId])
   @@index([date])
 }
+
+model WarmupPlan {
+  id                 String    @id @default(uuid())
+  mailboxId          String    @unique
+  mailbox            Mailbox   @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  currentDailyLimit  Int       @default(10)
+  targetDailyLimit   Int       @default(50)
+  rampUpStep         Int       @default(5)
+  replyRatePercent   Int       @default(30)
+  status             String    @default("active")
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([mailboxId])
+}
+
+model EmailTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  subject     String
+  body        String             // legacy plain-text fallback
+  htmlContent String?            // rendered email-safe HTML (cached from renderer)
+  designJson  Json?              // canonical visual builder JSON (source of truth)
+  description String?
+  previewText String?
+  category    String   @default("general")
+  variables   String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+}
+
+model Segment {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  conditions  Json
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+}
+

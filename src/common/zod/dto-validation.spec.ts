@@ -119,6 +119,7 @@ describe('Zod Schema DTO Validation', () => {
     it('should validate step with variants', () => {
       const payload = {
         stepOrder: 1,
+        delayDays: 3,
         variants: [
           {
             variantKey: 'A',

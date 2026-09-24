@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
   UseGuards,
   Headers,
@@ -62,5 +63,14 @@ export class AuthController {
       ? authHeader.split(' ')[1]
       : undefined;
     return this.authService.logout(user.id, accessToken);
+  }
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get current authenticated user profile' })
+  @ApiResponse({ status: 200, description: 'Current user profile returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Missing or invalid JWT' })
+  getMe(@CurrentUser() user: any) {
+    return this.authService.getProfile(user.id);
   }
 }

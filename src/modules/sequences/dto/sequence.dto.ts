@@ -2,11 +2,13 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
 export const CreateVariantSchema = z.object({
-  variantKey: z.string().min(1, 'variantKey is required').describe('A/B variant identifier (e.g. A, B)'),
+  variantKey: z.string().default('A').optional().describe('A/B variant identifier (e.g. A, B)'),
   weight: z
     .number()
     .min(0)
     .max(100)
+    .default(100)
+    .optional()
     .describe('Traffic split weight percentage (0-100)'),
   subject: z
     .string()
@@ -21,8 +23,9 @@ export const CreateVariantSchema = z.object({
 export class CreateVariantDto extends createZodDto(CreateVariantSchema) {}
 
 export const CreateStepSchema = z.object({
-  stepOrder: z.number().int().min(1).describe('Sequence step position order (1, 2, 3...)'),
-  delayDays: z.number().int().min(0).default(3).optional().describe('Wait duration in days after previous step'),
+  stepOrder: z.number().int().min(1).optional().describe('Sequence step position order (1, 2, 3...)'),
+  position: z.number().int().min(1).optional().describe('Alias for stepOrder'),
+  delayDays: z.number().int().min(0).default(0).optional().describe('Wait duration in days after previous step'),
   delayHours: z
     .number()
     .int()

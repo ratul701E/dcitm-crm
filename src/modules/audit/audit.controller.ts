@@ -27,8 +27,8 @@ export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   @Get()
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'List system audit logs (Admin only)' })
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'List system audit logs' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1, description: 'Page number' })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 50, description: 'Items per page' })
   @ApiResponse({ status: 200, description: 'Paginated audit logs returned successfully' })

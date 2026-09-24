@@ -8,6 +8,7 @@ export interface CreateAuditLogParams {
   targetId?: string;
   metadata?: any;
   ipAddress?: string;
+  status?: string;
 }
 
 @Injectable()
@@ -23,6 +24,7 @@ export class AuditService {
         targetId: params.targetId,
         metadata: params.metadata,
         ipAddress: params.ipAddress,
+        status: params.status || 'success',
       },
     });
   }

@@ -13,6 +13,53 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const configService = app.get(ConfigService);
 
+  process.on('unhandledRejection', (reason: any) => {
+    logger.error(`Unhandled Promise Rejection: ${reason?.message || reason}`, reason?.stack);
+  });
+
+  // Support Chrome Private Network Access (PNA) for loopback calls from public tunnels
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    next();
+  });
+
+  // CORS — allow frontend dev servers (localhost on any port) and configured origins
+  app.enableCors({
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Allow requests with no origin (server-to-server, curl, Swagger, mobile apps)
+      if (!origin) return callback(null, true);
+
+      // Allow any localhost or 127.0.0.1 port (e.g., 3001, 5173, etc.) and ngrok tunnels
+      if (
+        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+        /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) ||
+        origin.includes('canonistic-salley-uncut.ngrok-free.dev') ||
+        /\.ngrok-free\.(app|dev)$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+
+      const configuredOrigin = configService.get<string>('CORS_ORIGIN', '');
+      if (configuredOrigin) {
+        const allowedList = configuredOrigin.split(',').map((s) => s.trim());
+        if (configuredOrigin === '*' || allowedList.includes(origin)) {
+          return callback(null, true);
+        }
+      }
+
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'X-Requested-With',
+      'Access-Control-Request-Private-Network',
+    ],
+  });
+
   // Global prefixes and pipes
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ZodValidationPipe());

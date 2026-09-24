@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
+import { AuditService } from '../audit/audit.service';
 import { RegisterDto, LoginDto, RefreshTokenDto } from './dto/auth.dto';
 import { UserRole } from '@prisma/client';
 
@@ -18,6 +19,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
+    private readonly auditService: AuditService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -56,6 +58,15 @@ export class AuthService {
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
+    await this.auditService.log({
+      actorUserId: user.id,
+      action: 'USER_REGISTER',
+      targetEntity: 'User',
+      targetId: user.id,
+      metadata: { email: user.email, role: user.role },
+      status: 'success',
+    });
+
     return {
       user,
       ...tokens,
@@ -78,6 +89,15 @@ export class AuthService {
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     await this.updateRefreshToken(user.id, tokens.refreshToken);
+
+    await this.auditService.log({
+      actorUserId: user.id,
+      action: 'USER_LOGIN',
+      targetEntity: 'User',
+      targetId: user.id,
+      metadata: { email: user.email },
+      status: 'success',
+    });
 
     return {
       user: {
@@ -120,6 +140,28 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
+  }
+
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+
+    return user;
   }
 
   async logout(userId: string, accessToken?: string) {

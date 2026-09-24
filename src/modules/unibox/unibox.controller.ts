@@ -81,4 +81,31 @@ export class UniboxController {
   ) {
     return this.uniboxService.sendManualReply(id, dto);
   }
+
+  @Patch('replies/:id/read')
+  @ApiOperation({ summary: 'Mark reply as read or unread' })
+  @ApiParam({ name: 'id', description: 'Inbound Reply UUID' })
+  markRead(
+    @Param('id') id: string,
+    @Body() body: { isRead?: boolean },
+  ) {
+    return this.uniboxService.markRead(id, body?.isRead ?? true);
+  }
+
+  @Patch('replies/:id/star')
+  @ApiOperation({ summary: 'Toggle starred status on reply' })
+  @ApiParam({ name: 'id', description: 'Inbound Reply UUID' })
+  toggleStar(@Param('id') id: string) {
+    return this.uniboxService.toggleStar(id);
+  }
+
+  @Patch('replies/:id/status')
+  @ApiOperation({ summary: 'Update thread status (active, archived, resolved)' })
+  @ApiParam({ name: 'id', description: 'Inbound Reply UUID' })
+  updateStatus(
+    @Param('id') id: string,
+    @Body() body: { status: string },
+  ) {
+    return this.uniboxService.updateStatus(id, body?.status || 'active');
+  }
 }

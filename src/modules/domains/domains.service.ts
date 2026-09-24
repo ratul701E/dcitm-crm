@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DnsAuditorService } from './dns-auditor.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateDomainDto, UpdateDomainDto } from './dto/domain.dto';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
@@ -16,6 +17,7 @@ export class DomainsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly dnsAuditor: DnsAuditorService,
+    private readonly auditService: AuditService,
   ) {}
 
   async create(dto: CreateDomainDto) {
@@ -24,7 +26,8 @@ export class DomainsService {
       where: { name: domainName },
     });
     if (existing) {
-      throw new ConflictException(`Domain ${domainName} is already registered`);
+      this.logger.log(`Domain ${domainName} is already registered (${existing.id}), returning existing record`);
+      return existing;
     }
 
     const domain = await this.prisma.domain.create({
@@ -33,6 +36,14 @@ export class DomainsService {
         dkimSelector: dto.dkimSelector || 'google',
         redirectUrl: dto.redirectUrl,
       },
+    });
+
+    await this.auditService.log({
+      action: 'DOMAIN_CREATE',
+      targetEntity: 'Domain',
+      targetId: domain.id,
+      metadata: { name: domain.name },
+      status: 'success',
     });
 
     // Run immediate DNS check asynchronously
@@ -77,21 +88,41 @@ export class DomainsService {
   }
 
   async update(id: string, dto: UpdateDomainDto) {
-    await this.findOne(id);
-    return this.prisma.domain.update({
+    const domain = await this.findOne(id);
+    const updated = await this.prisma.domain.update({
       where: { id },
       data: {
         dkimSelector: dto.dkimSelector,
         redirectUrl: dto.redirectUrl,
       },
     });
+
+    await this.auditService.log({
+      action: 'DOMAIN_UPDATE',
+      targetEntity: 'Domain',
+      targetId: id,
+      metadata: dto,
+      status: 'success',
+    });
+
+    return updated;
   }
 
   async remove(id: string) {
-    await this.findOne(id);
-    return this.prisma.domain.delete({
+    const domain = await this.findOne(id);
+    const deleted = await this.prisma.domain.delete({
       where: { id },
     });
+
+    await this.auditService.log({
+      action: 'DOMAIN_DELETE',
+      targetEntity: 'Domain',
+      targetId: id,
+      metadata: { name: domain.name },
+      status: 'success',
+    });
+
+    return deleted;
   }
 
   /**
@@ -114,6 +145,14 @@ export class DomainsService {
         ctdCnamePass: results.ctdCnamePass,
         lastDnsCheckedAt: new Date(),
       },
+    });
+
+    await this.auditService.log({
+      action: 'DOMAIN_DNS_VERIFY',
+      targetEntity: 'Domain',
+      targetId: id,
+      metadata: results,
+      status: 'success',
     });
 
     return {

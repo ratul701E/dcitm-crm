@@ -88,6 +88,12 @@ export class ProviderAdaptersService {
       headers,
     });
 
+    if (info.rejected && info.rejected.length > 0) {
+      throw new Error(
+        `SMTP recipient rejected: ${info.rejected.join(', ')} - ${info.response || 'Rejected by server'}`,
+      );
+    }
+
     return {
       success: true,
       messageId: payload.messageId,

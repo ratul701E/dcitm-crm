@@ -28,9 +28,10 @@ export class VerificationQueueService
   ) {}
 
   onModuleInit() {
-    const connection = {
+    const connection: any = {
       host: this.configService.get<string>('REDIS_HOST', 'localhost'),
       port: this.configService.get<number>('REDIS_PORT', 6379),
+      username: this.configService.get<string>('REDIS_USERNAME') || undefined,
       password: this.configService.get<string>('REDIS_PASSWORD') || undefined,
     };
 

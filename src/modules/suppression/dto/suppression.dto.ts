@@ -14,6 +14,10 @@ export const CreateSuppressionSchema = z.object({
     .string()
     .optional()
     .describe('Audit origin of the suppression record'),
+  notes: z
+    .string()
+    .optional()
+    .describe('Optional internal notes or reasoning'),
 });
 
 export class CreateSuppressionDto extends createZodDto(CreateSuppressionSchema) {}
@@ -26,6 +30,10 @@ export const BulkSuppressionSchema = z.object({
   reason: z
     .nativeEnum(SuppressionReason)
     .describe('Reason for suppression'),
+  notes: z
+    .string()
+    .optional()
+    .describe('Optional internal notes or reasoning'),
 });
 
 export class BulkSuppressionDto extends createZodDto(BulkSuppressionSchema) {}

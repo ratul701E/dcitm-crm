@@ -53,30 +53,58 @@ export class InboundSyncService {
     const client = new ImapFlow({
       host: config.imapHost,
       port: config.imapPort || 993,
-      secure: config.imapPort === 993,
+      secure: config.imapSecurity ? config.imapSecurity === 'ssl' : (config.imapPort === 993),
       auth: {
         user: config.imapUser,
         pass: config.imapPass,
       },
       logger: false,
+      connectionTimeout: 30000,
+      greetingTimeout: 15000,
+      socketTimeout: 45000,
     });
 
-    await client.connect();
+    // Essential: ImapFlow is an EventEmitter. Without an 'error' event listener,
+    // socket timeouts (ETIMEOUT) or connection drops emit an unhandled 'error' event
+    // that crashes the entire Node.js server.
+    client.on('error', (err: any) => {
+      this.logger.warn(`IMAP client socket error for ${mailbox.email}: ${err?.message || err}`);
+    });
 
     try {
+      await client.connect();
+
       const lock = await client.getMailboxLock('INBOX');
       try {
         // Fetch unseen messages in INBOX
-        for await (const message of client.fetch({ seen: false }, { source: true })) {
+        for await (const message of client.fetch({ seen: false }, { source: true, uid: true })) {
           if (!message.source) continue;
           const parsed = await simpleParser(message.source);
           await this.processIncomingEmail(mailbox, parsed);
+          // Mark as seen so IMAP doesn't return it again repeatedly
+          try {
+            await client.messageFlagsAdd({ uid: message.uid }, ['\\Seen'], { uid: true });
+          } catch (flagErr: any) {
+            this.logger.debug(`Could not mark message ${message.uid} as seen: ${flagErr.message}`);
+          }
         }
       } finally {
-        lock.release();
+        try {
+          lock.release();
+        } catch (lockErr: any) {
+          this.logger.debug(`Could not release lock for ${mailbox.email}: ${lockErr?.message}`);
+        }
       }
     } finally {
-      await client.logout();
+      try {
+        if (client.usable) {
+          await client.logout();
+        } else {
+          client.close();
+        }
+      } catch (closeErr: any) {
+        this.logger.debug(`Could not close IMAP client for ${mailbox.email}: ${closeErr?.message}`);
+      }
     }
   }
 
@@ -123,9 +151,34 @@ export class InboundSyncService {
         where: {
           lead: { email: fromEmail },
           mailboxId: mailbox.id,
+          status: { in: ['SENT', 'DELIVERED'] },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { sentAt: 'desc' },
       });
+    }
+
+    // Fallback timestamp guard: If matching by email without RFC2822 In-Reply-To/References,
+    // verify the inbound email was actually received AFTER the campaign email was sent!
+    if (candidateMessageIds.length === 0 && emailLog?.sentAt && parsed.date) {
+      const emailSentTime = new Date(emailLog.sentAt).getTime();
+      const replyTime = new Date(parsed.date).getTime();
+      if (replyTime < emailSentTime) {
+        // Message was received before this campaign email was sent: ignore as historical email
+        return;
+      }
+    }
+
+    // Check if this exact reply has already been saved to avoid duplicates
+    const duplicateReply = await this.prisma.inboundReply.findFirst({
+      where: {
+        mailboxId: mailbox.id,
+        fromEmail,
+        subject,
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+    });
+    if (duplicateReply) {
+      return;
     }
 
     // 3. Match Lead

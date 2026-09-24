@@ -16,7 +16,12 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { CampaignsService } from './campaigns.service';
-import { CreateCampaignDto, UpdateCampaignDto } from './dto/campaign.dto';
+import {
+  CreateCampaignDto,
+  UpdateCampaignDto,
+  SendTestEmailDto,
+  PreviewDelaysDto,
+} from './dto/campaign.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -29,6 +34,23 @@ import { UserRole } from '@prisma/client';
 @Controller('campaigns')
 export class CampaignsController {
   constructor(private readonly campaignsService: CampaignsService) {}
+
+  @Post('preview-delays')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Preview a sequence of 10 calculated delays for given delay settings' })
+  @ApiResponse({ status: 200, description: 'Generated preview delays sequence' })
+  previewDelays(@Body() dto: PreviewDelaysDto) {
+    return this.campaignsService.previewDelays(dto);
+  }
+
+  @Post('test-email')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Send a live test sample email via configured mailbox' })
+  @ApiResponse({ status: 200, description: 'Test email sent successfully' })
+  @ApiResponse({ status: 400, description: 'Validation or dispatch error' })
+  sendTestEmail(@Body() dto: SendTestEmailDto) {
+    return this.campaignsService.sendTestEmail(dto);
+  }
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.MEMBER)
@@ -66,6 +88,32 @@ export class CampaignsController {
   @ApiResponse({ status: 404, description: 'Campaign not found' })
   update(@Param('id') id: string, @Body() dto: UpdateCampaignDto) {
     return this.campaignsService.update(id, dto);
+  }
+
+  @Get(':id/stats')
+  @ApiOperation({ summary: 'Get campaign real-time sending and engagement stats' })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiResponse({ status: 200, description: 'Campaign stats' })
+  getStats(@Param('id') id: string) {
+    return this.campaignsService.getStats(id);
+  }
+
+  @Post(':id/trigger')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Trigger immediate schedule evaluation and dispatch for a campaign' })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiResponse({ status: 200, description: 'Campaign triggered successfully' })
+  trigger(@Param('id') id: string) {
+    return this.campaignsService.triggerCampaign(id);
+  }
+
+  @Post(':id/duplicate')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Duplicate an existing campaign and its sequences' })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiResponse({ status: 201, description: 'Campaign duplicated successfully' })
+  duplicate(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.campaignsService.duplicate(id, user.id);
   }
 
   @Delete(':id')

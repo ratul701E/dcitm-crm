@@ -179,4 +179,34 @@ export class UniboxService {
       messageId,
     };
   }
+
+  async markRead(replyId: string, isRead = true) {
+    const reply = await this.prisma.inboundReply.findUnique({ where: { id: replyId } });
+    if (!reply) throw new NotFoundException('Reply not found');
+
+    return this.prisma.inboundReply.update({
+      where: { id: replyId },
+      data: { isRead },
+    });
+  }
+
+  async toggleStar(replyId: string) {
+    const reply = await this.prisma.inboundReply.findUnique({ where: { id: replyId } });
+    if (!reply) throw new NotFoundException('Reply not found');
+
+    return this.prisma.inboundReply.update({
+      where: { id: replyId },
+      data: { isStarred: !reply.isStarred },
+    });
+  }
+
+  async updateStatus(replyId: string, status: string) {
+    const reply = await this.prisma.inboundReply.findUnique({ where: { id: replyId } });
+    if (!reply) throw new NotFoundException('Reply not found');
+
+    return this.prisma.inboundReply.update({
+      where: { id: replyId },
+      data: { status },
+    });
+  }
 }

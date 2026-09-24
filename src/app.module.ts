@@ -22,6 +22,11 @@ import { DispatcherModule } from './modules/dispatcher/dispatcher.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { InboundModule } from './modules/inbound/inbound.module';
 import { UniboxModule } from './modules/unibox/unibox.module';
+import { UsersModule } from './modules/users/users.module';
+import { TemplatesModule } from './modules/templates/templates.module';
+import { SegmentsModule } from './modules/segments/segments.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -60,6 +65,11 @@ import { UniboxModule } from './modules/unibox/unibox.module';
     SchedulerModule,
     InboundModule,
     UniboxModule,
+    UsersModule,
+    TemplatesModule,
+    SegmentsModule,
+    AnalyticsModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

@@ -15,8 +15,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install all dependencies (including devDependencies for build)
-RUN npm ci
+# Install dependencies (npm install dynamically resolves platform-specific Linux binaries)
+RUN npm install
 
 # Generate Prisma Client
 RUN npx prisma generate
@@ -28,8 +28,8 @@ COPY src ./src/
 # Compile TypeScript to JavaScript
 RUN npm run build
 
-# Remove development dependencies and ensure prisma CLI is retained for runtime db migrations
-RUN npm prune --omit=dev && npm install prisma@6.19.3 --no-save
+# Remove development dependencies for a lean production image
+RUN npm prune --omit=dev
 
 # ===================================================
 # Stage 2: Production Minimal Runtime

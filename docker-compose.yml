@@ -62,11 +62,11 @@ services:
       PORT: 3000
       DB_HOST: postgres
       DB_PORT: 5432
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_secure_password_replace_in_prod}@postgres:5432/${POSTGRES_DB:-dcitm_crm}?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_secure_password_replace_in_prod}@postgres:5432/${POSTGRES_DB:-dcitm_crm}?schema=public}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_password_replace_in_prod}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_replace_in_prod}@redis:6379
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-redis_secure_password_replace_in_prod}@redis:6379}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-super_secret_access_jwt_key_at_least_32_characters_long_dcitm}
       JWT_ACCESS_EXPIRATION: ${JWT_ACCESS_EXPIRATION:-15m}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super_secret_refresh_jwt_key_at_least_32_characters_long_dcitm}

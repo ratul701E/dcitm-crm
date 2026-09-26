@@ -25,7 +25,9 @@ RUN npx prisma generate
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src/
 
-# Compile TypeScript to JavaScript
+# Compile TypeScript to JavaScript with expanded Node heap memory
+ARG NODE_OPTIONS="--max-old-space-size=4096"
+ENV NODE_OPTIONS=$NODE_OPTIONS
 RUN npm run build
 
 # Remove development dependencies for a lean production image

@@ -1,0 +1,56 @@
+# ===================================================
+# Stage 1: Build NestJS application and Prisma client
+# ===================================================
+FROM node:20-alpine AS builder
+
+RUN apk add --no-cache openssl
+
+WORKDIR /app
+
+# Copy package descriptors and prisma schema
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
+
+# Generate Prisma Client
+RUN npx prisma generate
+
+# Copy source code and build configs
+COPY tsconfig*.json nest-cli.json ./
+COPY src ./src/
+
+# Compile TypeScript to JavaScript
+RUN npm run build
+
+# Remove development dependencies and ensure prisma CLI is retained for runtime db migrations
+RUN npm prune --omit=dev && npm install prisma@6.19.3 --no-save
+
+# ===================================================
+# Stage 2: Production Minimal Runtime
+# ===================================================
+FROM node:20-alpine AS runner
+
+RUN apk add --no-cache openssl dumb-init netcat-openbsd
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Copy production dependencies, prisma schema, and compiled artifacts with node ownership
+COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+COPY --chown=node:node --from=builder /app/package*.json ./
+COPY --chown=node:node --from=builder /app/prisma ./prisma
+COPY --chown=node:node --from=builder /app/dist ./dist
+
+# Copy startup entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Use non-root node user for enhanced container security
+USER node
+
+EXPOSE 3000
+
+ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/docker-entrypoint.sh"]
+CMD ["node", "dist/main.js"]

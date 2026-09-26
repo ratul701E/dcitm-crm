@@ -1,9 +1,13 @@
 # ===================================================
 # Stage 1: Build NestJS application and Prisma client
 # ===================================================
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
-RUN apk add --no-cache openssl
+# Install OpenSSL for Prisma engine compatibility and CA certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -30,9 +34,13 @@ RUN npm prune --omit=dev && npm install prisma@6.19.3 --no-save
 # ===================================================
 # Stage 2: Production Minimal Runtime
 # ===================================================
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 
-RUN apk add --no-cache openssl dumb-init netcat-openbsd
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl \
+    ca-certificates \
+    dumb-init \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 WORKDIR /app

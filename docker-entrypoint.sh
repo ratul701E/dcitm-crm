@@ -3,7 +3,7 @@ set -e
 
 echo "==> DCITM CRM Backend Container Initializing..."
 
-# Extract host and port from DATABASE_URL or environment variables
+# Extract host and port from environment variables
 DB_HOST=${DB_HOST:-postgres}
 DB_PORT=${DB_PORT:-5432}
 
@@ -11,7 +11,14 @@ echo "==> Waiting for PostgreSQL at ${DB_HOST}:${DB_PORT} to be ready..."
 MAX_RETRIES=30
 RETRY_COUNT=0
 
-until nc -z -v -w5 "$DB_HOST" "$DB_PORT" 2>/dev/null; do
+until node -e "
+const net = require('net');
+const client = net.connect({ host: process.env.DB_HOST || 'postgres', port: parseInt(process.env.DB_PORT || '5432', 10) }, () => {
+  client.end();
+  process.exit(0);
+});
+client.on('error', () => process.exit(1));
+" 2>/dev/null; do
   RETRY_COUNT=$((RETRY_COUNT + 1))
   if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
     echo "==> ERROR: Timed out waiting for PostgreSQL to become ready."

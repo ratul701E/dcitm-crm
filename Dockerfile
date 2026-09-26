@@ -41,6 +41,7 @@ FROM node:20-bookworm-slim AS runner
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
+    curl \
     dumb-init \
     && rm -rf /var/lib/apt/lists/*
 

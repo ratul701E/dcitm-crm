@@ -160,10 +160,19 @@ export class CampaignSchedulerService {
     // 5. Find candidate leads — filter out ONLY absolute terminal statuses globally.
     //    COMPLETED, REPLIED, IN_PROGRESS, NEW are all valid for per-campaign evaluation.
     //    Exclude leads who have already sent the final step of this campaign or replied to it.
+    //    Uses frozen CampaignRecipient snapshot so newly added group members are never scheduled.
+    const snapshotCount = await this.prisma.campaignRecipient.count({
+      where: { campaignId: campaign.id },
+    });
+
+    const leadScopeFilter: any = snapshotCount > 0
+      ? { campaignRecipients: { some: { campaignId: campaign.id } } }
+      : { leadListId: { in: leadListIds } };
+
     const lastStep = sequence.steps[sequence.steps.length - 1];
     const candidateLeads = await this.prisma.lead.findMany({
       where: {
-        leadListId: { in: leadListIds },
+        ...leadScopeFilter,
         deletedAt: null,
         status: { notIn: TERMINAL_STATUSES },
         OR: [
@@ -479,13 +488,23 @@ export class CampaignSchedulerService {
         return false;
       }
 
-      // 2. Count total leads attached to this campaign's lists
-      const totalLeadsCount = await this.prisma.lead.count({
-        where: {
-          leadListId: { in: leadListIds },
-          deletedAt: null,
-        },
+      // 2. Count total leads attached to this campaign's snapshot (or lists)
+      const snapshotCount = await this.prisma.campaignRecipient.count({
+        where: { campaignId: campaign.id },
       });
+
+      const leadScopeFilter: any = snapshotCount > 0
+        ? { campaignRecipients: { some: { campaignId: campaign.id } } }
+        : { leadListId: { in: leadListIds } };
+
+      const totalLeadsCount = snapshotCount > 0
+        ? snapshotCount
+        : await this.prisma.lead.count({
+            where: {
+              leadListId: { in: leadListIds },
+              deletedAt: null,
+            },
+          });
       if (totalLeadsCount === 0) {
         return false;
       }
@@ -494,7 +513,7 @@ export class CampaignSchedulerService {
       // and are NOT in terminal status.
       const unfinishedLeads = await this.prisma.lead.findMany({
         where: {
-          leadListId: { in: leadListIds },
+          ...leadScopeFilter,
           deletedAt: null,
           status: { notIn: TERMINAL_STATUSES },
           NOT: [

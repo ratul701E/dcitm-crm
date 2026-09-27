@@ -31,6 +31,61 @@ export class CampaignsService {
     private readonly emailDelayService: EmailDelayService,
   ) {}
 
+  /**
+   * Captures an immutable snapshot of recipient leads from assigned lead lists.
+   */
+  private async snapshotCampaignRecipients(
+    tx: any,
+    campaignId: string,
+    leadListIds: string[],
+    excludedLeadListIds: string[] = [],
+  ) {
+    if (!leadListIds || leadListIds.length === 0) return 0;
+    const validListIds = leadListIds.filter((lid) => !excludedLeadListIds.includes(lid));
+    if (validListIds.length === 0) return 0;
+
+    const eligibleLeads = await tx.lead.findMany({
+      where: {
+        leadListId: { in: validListIds },
+        deletedAt: null,
+        status: { notIn: [LeadStatus.BOUNCED, LeadStatus.UNSUBSCRIBED, LeadStatus.SUPPRESSED] },
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        company: true,
+      },
+    });
+
+    const seenEmails = new Set<string>();
+    const snapshotData: any[] = [];
+    for (const lead of eligibleLeads) {
+      const normalized = lead.email.trim().toLowerCase();
+      if (!seenEmails.has(normalized)) {
+        seenEmails.add(normalized);
+        snapshotData.push({
+          campaignId,
+          leadId: lead.id,
+          email: lead.email,
+          firstName: lead.firstName,
+          lastName: lead.lastName,
+          company: lead.company,
+        });
+      }
+    }
+
+    if (snapshotData.length > 0) {
+      await tx.campaignRecipient.createMany({
+        data: snapshotData,
+        skipDuplicates: true,
+      });
+    }
+
+    return snapshotData.length;
+  }
+
   async create(userId: string, dto: CreateCampaignDto) {
     const minDelay = dto.minimumDelaySeconds ?? dto.minDelaySeconds ?? 10;
     const seed = dto.randomSeed || this.emailDelayService.generateSecureSeed();
@@ -94,6 +149,14 @@ export class CampaignsService {
               leadListId: l.id,
             })),
           });
+
+          // Snapshot recipients at creation time
+          await this.snapshotCampaignRecipients(
+            tx,
+            campaign.id,
+            validLeadLists.map((l) => l.id),
+            dto.excludedLeadListIds || [],
+          );
         }
       }
 
@@ -130,10 +193,10 @@ export class CampaignsService {
     }, { timeout: 30000 });
 
     // Prime lead nextScheduledAt outside the transaction to avoid timeout on large lists
-    if (dto.status === CampaignStatus.ACTIVE && dto.leadListIds && dto.leadListIds.length > 0) {
+    if (dto.status === CampaignStatus.ACTIVE) {
       await this.prisma.lead.updateMany({
         where: {
-          leadListId: { in: dto.leadListIds },
+          campaignRecipients: { some: { campaignId: created.id } },
           status: { notIn: [LeadStatus.BOUNCED, LeadStatus.UNSUBSCRIBED, LeadStatus.SUPPRESSED] },
         },
         data: {
@@ -264,6 +327,24 @@ export class CampaignsService {
             },
           },
         },
+        recipients: {
+          include: {
+            lead: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                company: true,
+                jobTitle: true,
+                status: true,
+                verificationStatus: true,
+                nextScheduledAt: true,
+                currentStepOrder: true,
+              },
+            },
+          },
+        },
         sequences: {
           include: {
             steps: {
@@ -303,6 +384,36 @@ export class CampaignsService {
       }
     }
 
+    // Auto-backfill snapshot for legacy campaigns if recipients is empty
+    if ((campaign as any).recipients?.length === 0 && campaign.campaignLeadLists?.length > 0) {
+      const listIds = campaign.campaignLeadLists.map((cl: any) => cl.leadListId);
+      await this.snapshotCampaignRecipients(
+        this.prisma,
+        campaign.id,
+        listIds,
+        campaign.excludedLeadListIds || [],
+      );
+      (campaign as any).recipients = await this.prisma.campaignRecipient.findMany({
+        where: { campaignId: campaign.id },
+        include: {
+          lead: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              company: true,
+              jobTitle: true,
+              status: true,
+              verificationStatus: true,
+              nextScheduledAt: true,
+              currentStepOrder: true,
+            },
+          },
+        },
+      });
+    }
+
     const [stats, throttleStatus] = await Promise.all([
       this.getStats(id).catch(() => null),
       this.getCampaignThrottleStatus(id).catch(() => ({ isThrottled: false })),
@@ -316,7 +427,7 @@ export class CampaignsService {
   }
 
   async update(id: string, dto: UpdateCampaignDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const minDelay = dto.minimumDelaySeconds !== undefined
@@ -371,7 +482,14 @@ export class CampaignsService {
       }
 
       // Update lead list associations if explicitly provided (only existing IDs)
-      if (dto.leadListIds) {
+      // NOTE: If the campaign is already completed, the recipients snapshot is permanently frozen.
+      const isCompleted = ([
+        CampaignStatus.COMPLETED,
+        CampaignStatus.COMPLETED_WITH_ERRORS,
+        CampaignStatus.FAILED,
+      ] as string[]).includes(current.status);
+
+      if (!isCompleted && dto.leadListIds) {
         await tx.campaignLeadList.deleteMany({ where: { campaignId: id } });
         if (dto.leadListIds.length > 0) {
           const validLeadLists = await tx.leadList.findMany({
@@ -385,29 +503,33 @@ export class CampaignsService {
                 leadListId: l.id,
               })),
             });
+
+            // Resynchronize snapshot if campaign is DRAFT or has sent 0 emails
+            const logsCount = await tx.emailLog.count({ where: { campaignId: id } });
+            if (logsCount === 0) {
+              await tx.campaignRecipient.deleteMany({ where: { campaignId: id } });
+              await this.snapshotCampaignRecipients(
+                tx,
+                id,
+                validLeadLists.map((l) => l.id),
+                dto.excludedLeadListIds || current.excludedLeadListIds || [],
+              );
+            }
           }
         }
       }
 
-      // If campaign transitions to ACTIVE, prime initial nextScheduledAt for uncontacted leads
+      // If campaign transitions to ACTIVE, prime initial nextScheduledAt for snapshotted leads
       if (dto.status === CampaignStatus.ACTIVE) {
-        const leadLists = await tx.campaignLeadList.findMany({
-          where: { campaignId: id },
-          select: { leadListId: true },
+        await tx.lead.updateMany({
+          where: {
+            campaignRecipients: { some: { campaignId: id } },
+            status: { notIn: [LeadStatus.BOUNCED, LeadStatus.UNSUBSCRIBED, LeadStatus.SUPPRESSED] },
+          },
+          data: {
+            nextScheduledAt: new Date(),
+          },
         });
-        const leadListIds = leadLists.map((l) => l.leadListId);
-
-        if (leadListIds.length > 0) {
-          await tx.lead.updateMany({
-            where: {
-              leadListId: { in: leadListIds },
-              status: { notIn: [LeadStatus.BOUNCED, LeadStatus.UNSUBSCRIBED, LeadStatus.SUPPRESSED] },
-            },
-            data: {
-              nextScheduledAt: new Date(),
-            },
-          });
-        }
       }
 
       return updated;
@@ -489,6 +611,15 @@ export class CampaignsService {
             leadListId: cl.leadListId,
           })),
         });
+
+        // Snapshot current members of the lists for the duplicated campaign
+        const listIds = original.campaignLeadLists.map((cl) => cl.leadListId);
+        await this.snapshotCampaignRecipients(
+          tx,
+          duplicated.id,
+          listIds,
+          original.excludedLeadListIds || [],
+        );
       }
 
       for (const seq of original.sequences) {
@@ -646,19 +777,25 @@ export class CampaignsService {
       throw new NotFoundException('Campaign not found');
     }
 
-    // Canonical deduplicated audience count excluding excludedLeadListIds
-    const assignedLists = campaign.campaignLeadLists.map((cl) => cl.leadListId);
-    const excludedLists = campaign.excludedLeadListIds || [];
-    const validListIds = assignedLists.filter((listId) => !excludedLists.includes(listId));
+    // Use the frozen snapshot count if available; fallback to list calculation for legacy records
+    const snapshotCount = await this.prisma.campaignRecipient.count({
+      where: { campaignId: id },
+    });
 
-    let totalRecipients = 0;
-    if (validListIds.length > 0) {
-      const distinctLeads = await this.prisma.lead.findMany({
-        where: { leadListId: { in: validListIds } },
-        select: { email: true },
-        distinct: ['email'],
-      });
-      totalRecipients = distinctLeads.length;
+    let totalRecipients = snapshotCount;
+    if (totalRecipients === 0) {
+      const assignedLists = campaign.campaignLeadLists.map((cl) => cl.leadListId);
+      const excludedLists = campaign.excludedLeadListIds || [];
+      const validListIds = assignedLists.filter((listId) => !excludedLists.includes(listId));
+
+      if (validListIds.length > 0) {
+        const distinctLeads = await this.prisma.lead.findMany({
+          where: { leadListId: { in: validListIds } },
+          select: { email: true },
+          distinct: ['email'],
+        });
+        totalRecipients = distinctLeads.length;
+      }
     }
 
     const [sent, delivered, opened, clicked, bounced, failed] = await Promise.all([

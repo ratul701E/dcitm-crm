@@ -233,6 +233,7 @@ model Lead {
 
   emailLogs          EmailLog[]
   inboundReplies     InboundReply[]
+  campaignRecipients CampaignRecipient[]
 
   @@unique([leadListId, email])
   @@index([email])
@@ -288,6 +289,7 @@ model Campaign {
 
   campaignMailboxes CampaignMailbox[]
   campaignLeadLists CampaignLeadList[]
+  recipients        CampaignRecipient[]
   sequences         Sequence[]
   emailLogs         EmailLog[]
   analyticsRollups  AnalyticsRollup[]
@@ -311,6 +313,25 @@ model CampaignLeadList {
   leadList   LeadList @relation(fields: [leadListId], references: [id], onDelete: Cascade)
 
   @@id([campaignId, leadListId])
+}
+
+model CampaignRecipient {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId     String
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  email      String
+  firstName  String?
+  lastName   String?
+  company    String?
+
+  createdAt  DateTime @default(now())
+
+  @@unique([campaignId, leadId])
+  @@index([campaignId])
+  @@index([leadId])
 }
 
 model Sequence {

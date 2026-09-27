@@ -70,6 +70,8 @@ enum CampaignStatus {
   ACTIVE
   PAUSED
   COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
 }
 
 enum DelayMode {

@@ -160,6 +160,12 @@ You can run the deployment script directly on the VPS at any time:
 # Deploy both
 /var/www/crm/deploy.sh all
 
+# Sync/Migrate database schema (Prisma db push)
+/var/www/crm/deploy.sh migrate
+
+# Seed database with initial data
+/var/www/crm/deploy.sh seed
+
 # Check container health and git revisions
 /var/www/crm/deploy.sh status
 ```

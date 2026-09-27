@@ -422,12 +422,22 @@ case "$TARGET" in
       exit 1
     fi
     ;;
+  migrate)
+    log_info "Running Prisma database schema synchronization (db push)..."
+    cd "$BACKEND_DIR"
+    docker compose exec backend npx prisma db push
+    ;;
+  seed)
+    log_info "Running database seed..."
+    cd "$BACKEND_DIR"
+    docker compose exec backend npm run seed
+    ;;
   status)
     show_status
     ;;
   *)
     log_error "Unknown target: '$TARGET'"
-    echo "Usage: $0 [auto|backend|frontend|all|rollback <service>|status]"
+    echo "Usage: $0 [auto|backend|frontend|all|migrate|seed|rollback <service>|status]"
     exit 1
     ;;
 esac

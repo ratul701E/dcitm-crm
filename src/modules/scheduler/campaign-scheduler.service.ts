@@ -198,10 +198,12 @@ export class CampaignSchedulerService {
 
     if (candidateLeads.length === 0) {
       this.logger.debug(`Campaign "${campaign.title}": no eligible leads found.`);
+      await this.checkAndFinalizeCampaignStatus(campaign);
       return;
     }
 
     // 6. For each candidate, derive per-campaign step progress from EmailLog
+    let dispatched = false;
     for (const lead of candidateLeads) {
       // Get all email logs for this lead in this campaign, ordered by step
       const campaignLogs = await this.prisma.emailLog.findMany({
@@ -330,7 +332,12 @@ export class CampaignSchedulerService {
       );
 
       // Send one email per scheduler tick to respect the calculated pacing delay
+      dispatched = true;
       break;
+    }
+
+    if (!dispatched) {
+      await this.checkAndFinalizeCampaignStatus(campaign);
     }
   }
 
@@ -414,6 +421,167 @@ export class CampaignSchedulerService {
       );
     } catch {
       return true;
+    }
+  }
+
+  /**
+   * Evaluates if an ACTIVE campaign has finished sending all emails to all leads in its enrolled lead lists.
+   * If finished:
+   *  - Transitions to COMPLETED if 0 errors/bounces.
+   *  - Transitions to COMPLETED_WITH_ERRORS if at least 1 email sent, but there are errors/bounces.
+   *  - Transitions to FAILED if all attempted emails failed.
+   */
+  public async checkAndFinalizeCampaignStatus(campaignInput: any | string): Promise<boolean> {
+    try {
+      const campaignId = typeof campaignInput === 'string' ? campaignInput : campaignInput.id;
+
+      const campaign = await this.prisma.campaign.findUnique({
+        where: { id: campaignId },
+        include: {
+          campaignLeadLists: true,
+          sequences: {
+            include: {
+              steps: {
+                orderBy: { stepOrder: 'asc' },
+              },
+            },
+          },
+        },
+      });
+
+      if (!campaign || campaign.status !== CampaignStatus.ACTIVE) {
+        return false;
+      }
+
+      const sequence = campaign.sequences?.[0];
+      if (!sequence || sequence.steps.length === 0) {
+        return false;
+      }
+      const lastStep = sequence.steps[sequence.steps.length - 1];
+
+      const excludedIds = campaign.excludedLeadListIds || [];
+      const leadListIds = campaign.campaignLeadLists
+        .map((l: any) => l.leadListId)
+        .filter((id: string) => !excludedIds.includes(id));
+
+      if (leadListIds.length === 0) {
+        return false;
+      }
+
+      // 1. Ensure no in-flight / pending dispatches exist for this campaign
+      const pendingCount = await this.prisma.emailLog.count({
+        where: {
+          campaignId: campaign.id,
+          status: 'PENDING',
+        },
+      });
+      if (pendingCount > 0) {
+        return false;
+      }
+
+      // 2. Count total leads attached to this campaign's lists
+      const totalLeadsCount = await this.prisma.lead.count({
+        where: {
+          leadListId: { in: leadListIds },
+          deletedAt: null,
+        },
+      });
+      if (totalLeadsCount === 0) {
+        return false;
+      }
+
+      // 3. Find any leads that have NOT completed the sequence, have NOT replied,
+      // and are NOT in terminal status.
+      const unfinishedLeads = await this.prisma.lead.findMany({
+        where: {
+          leadListId: { in: leadListIds },
+          deletedAt: null,
+          status: { notIn: TERMINAL_STATUSES },
+          NOT: [
+            {
+              emailLogs: {
+                some: {
+                  campaignId: campaign.id,
+                  sequenceStepId: lastStep.id,
+                  status: { in: ['SENT', 'DELIVERED'] as any },
+                },
+              },
+            },
+            {
+              emailLogs: {
+                some: {
+                  campaignId: campaign.id,
+                  inboundReplies: { some: {} },
+                },
+              },
+            },
+          ],
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      // For any such leads, verify if they still have actionable steps or if they hit retry exhaustion (>=3 FAILED)
+      for (const lead of unfinishedLeads) {
+        const logs = await this.prisma.emailLog.findMany({
+          where: { campaignId: campaign.id, leadId: lead.id },
+          include: { sequenceStep: { select: { stepOrder: true } } },
+        });
+
+        const nextStepOrder = this.deriveNextStepOrder(logs, sequence.steps);
+        if (nextStepOrder === null) {
+          continue;
+        }
+
+        const failedCountForStep = logs.filter(
+          (l) => l.sequenceStep?.stepOrder === nextStepOrder && l.status === 'FAILED',
+        ).length;
+
+        // If lead hasn't failed 3 times, they are still pending delivery or waiting for delay
+        if (failedCountForStep < 3) {
+          return false;
+        }
+      }
+
+      // All leads have been processed! Determine the outcome from EmailLog:
+      const [sentCount, errorCount] = await Promise.all([
+        this.prisma.emailLog.count({
+          where: {
+            campaignId: campaign.id,
+            status: { in: ['SENT', 'DELIVERED'] },
+          },
+        }),
+        this.prisma.emailLog.count({
+          where: {
+            campaignId: campaign.id,
+            status: { in: ['FAILED', 'BOUNCED'] },
+          },
+        }),
+      ]);
+
+      let finalStatus: CampaignStatus;
+      if (sentCount === 0 && errorCount > 0) {
+        finalStatus = CampaignStatus.FAILED;
+      } else if (errorCount > 0) {
+        finalStatus = CampaignStatus.COMPLETED_WITH_ERRORS;
+      } else {
+        finalStatus = CampaignStatus.COMPLETED;
+      }
+
+      await this.prisma.campaign.update({
+        where: { id: campaign.id },
+        data: { status: finalStatus },
+      });
+
+      this.logger.log(
+        `[CampaignScheduler] Campaign "${campaign.title}" (${campaign.id}) FINISHED with status: ${finalStatus}. (Sent: ${sentCount}, Errors: ${errorCount})`,
+      );
+
+      return true;
+    } catch (err: any) {
+      this.logger.error(`Error checking campaign completion: ${err.message}`);
+      return false;
     }
   }
 }

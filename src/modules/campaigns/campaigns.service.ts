@@ -292,6 +292,17 @@ export class CampaignsService {
       throw new NotFoundException('Campaign not found');
     }
 
+    if (campaign.status === CampaignStatus.ACTIVE) {
+      const finalized = await this.campaignScheduler.checkAndFinalizeCampaignStatus(campaign);
+      if (finalized) {
+        const fresh = await this.prisma.campaign.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        if (fresh) campaign.status = fresh.status;
+      }
+    }
+
     const [stats, throttleStatus] = await Promise.all([
       this.getStats(id).catch(() => null),
       this.getCampaignThrottleStatus(id).catch(() => ({ isThrottled: false })),

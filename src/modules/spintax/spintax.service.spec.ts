@@ -74,6 +74,29 @@ describe('SpintaxService Personalization Engine', () => {
         'Hi Sarah, Sarah, Stripe, Stripe, VP of Engineering, Alex Vance!',
       );
     });
+
+    it('should dynamically switch sender name and email when rotating between multiple mailboxes', () => {
+      const mailboxA = {
+        email: 'alice@domain-alpha.com',
+        senderName: 'Alice Alpha',
+      };
+      const mailboxB = {
+        email: 'bob@domain-beta.com',
+        senderName: 'Bob Beta',
+      };
+
+      const template = 'Best regards,\n{{senderName}}\nContact me at {{senderEmail}} or {{sender}}';
+
+      // Dispatched using Mailbox A
+      const contextA = service.buildVariableContext(lead, mailboxA, campaign);
+      const renderedA = service.interpolateVariables(template, contextA);
+      expect(renderedA).toBe('Best regards,\nAlice Alpha\nContact me at alice@domain-alpha.com or Alice Alpha');
+
+      // Dispatched using Mailbox B
+      const contextB = service.buildVariableContext(lead, mailboxB, campaign);
+      const renderedB = service.interpolateVariables(template, contextB);
+      expect(renderedB).toBe('Best regards,\nBob Beta\nContact me at bob@domain-beta.com or Bob Beta');
+    });
   });
 
   describe('Fallback Resolution', () => {

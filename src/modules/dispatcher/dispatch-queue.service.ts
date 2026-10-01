@@ -241,10 +241,13 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 9. Decrypt mailbox credentials and dispatch with personalized content and formatted sender name
-    const senderDisplayName = mailbox.senderName || mailbox.displayName;
+    const senderDisplayName =
+      (mailbox.senderName && mailbox.senderName.trim()) ||
+      (mailbox.displayName && mailbox.displayName.trim()) ||
+      '';
     const fromAddress = senderDisplayName
-      ? `"${senderDisplayName}" <${mailbox.email}>`
-      : mailbox.email;
+      ? `"${senderDisplayName.replace(/"/g, '')}" <${mailbox.email.trim()}>`
+      : mailbox.email.trim();
 
     try {
       const decryptedConfig = await this.mailboxesService.getDecryptedConfig(mailbox.id);

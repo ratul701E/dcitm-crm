@@ -36,8 +36,12 @@ export class SpintaxService {
       firstName ||
       lastName ||
       '';
-    const senderName = mailbox?.senderName || mailbox?.displayName || '';
-    const senderEmail = mailbox?.email || '';
+    const senderName =
+      (mailbox?.senderName && String(mailbox.senderName).trim()) ||
+      (mailbox?.displayName && String(mailbox.displayName).trim()) ||
+      (campaign?.senderName && String(campaign.senderName).trim()) ||
+      '';
+    const senderEmail = (mailbox?.email && String(mailbox.email).trim()) || '';
 
     let customVars: Record<string, any> = {};
     if (lead?.customVariables) {
@@ -81,6 +85,7 @@ export class SpintaxService {
       sender_name: senderName,
       fromName: senderName,
       from_name: senderName,
+      sender: senderName,
       senderEmail,
       sender_email: senderEmail,
       fromEmail: senderEmail,

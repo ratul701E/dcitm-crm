@@ -294,6 +294,9 @@ export class CampaignsService {
               select: {
                 id: true,
                 email: true,
+                senderName: true,
+                displayName: true,
+                replyToEmail: true,
                 type: true,
                 state: true,
                 sentCountToday: true,
@@ -363,7 +366,14 @@ export class CampaignsService {
             openedAt: true,
             clickedAt: true,
             bounceReason: true,
-            mailbox: { select: { email: true } },
+            mailbox: {
+              select: {
+                id: true,
+                email: true,
+                senderName: true,
+                displayName: true,
+              },
+            },
           },
         },
       },
@@ -898,9 +908,9 @@ export class CampaignsService {
     };
 
     const senderName =
-      dto.senderName ||
-      mailbox.senderName ||
-      mailbox.displayName ||
+      (mailbox.senderName && mailbox.senderName.trim()) ||
+      (mailbox.displayName && mailbox.displayName.trim()) ||
+      (dto.senderName && dto.senderName.trim()) ||
       'Outreach Director';
 
     const variables = this.spintaxService.buildVariableContext(
@@ -913,8 +923,8 @@ export class CampaignsService {
     const finalHtml = this.spintaxService.render(dto.bodyContent, variables);
 
     const fromAddress = senderName
-      ? `"${senderName}" <${mailbox.email}>`
-      : mailbox.email;
+      ? `"${senderName.replace(/"/g, '')}" <${mailbox.email.trim()}>`
+      : mailbox.email.trim();
 
     const result = await this.providerAdaptersService.dispatch(
       mailbox.type,

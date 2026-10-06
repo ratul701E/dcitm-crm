@@ -46,6 +46,48 @@ export class CampaignSchedulerService {
     this.isRunning = true;
 
     try {
+      const now = new Date();
+
+      // 1. Auto-start scheduled campaigns whose scheduled start time has arrived
+      // Supports both new status: SCHEDULED and legacy status: DRAFT with scheduledFor set
+      const dueScheduledCampaigns = await this.prisma.campaign.findMany({
+        where: {
+          OR: [
+            { status: CampaignStatus.SCHEDULED },
+            {
+              status: CampaignStatus.DRAFT,
+              scheduledFor: { not: null },
+            },
+          ],
+          scheduledFor: {
+            lte: now,
+            not: null,
+          },
+          ...(specificCampaignId ? { id: specificCampaignId } : {}),
+        },
+      });
+
+      for (const scheduledCamp of dueScheduledCampaigns) {
+        this.logger.log(
+          `[Scheduler] Scheduled campaign "${scheduledCamp.title}" (${scheduledCamp.id}) start time reached (${scheduledCamp.scheduledFor?.toISOString()}). Auto-starting.`,
+        );
+
+        await this.prisma.campaign.update({
+          where: { id: scheduledCamp.id },
+          data: { status: CampaignStatus.ACTIVE },
+        });
+
+        // Prime recipient leads for dispatch
+        await this.prisma.lead.updateMany({
+          where: {
+            campaignRecipients: { some: { campaignId: scheduledCamp.id } },
+            status: { notIn: TERMINAL_STATUSES },
+          },
+          data: { nextScheduledAt: now },
+        });
+      }
+
+      // 2. Fetch all ACTIVE campaigns (including those newly auto-started)
       const activeCampaigns = await this.prisma.campaign.findMany({
         where: {
           status: CampaignStatus.ACTIVE,
@@ -65,8 +107,6 @@ export class CampaignSchedulerService {
         },
       });
 
-      const now = new Date();
-
       for (const campaign of activeCampaigns) {
         try {
           await this.processCampaign(campaign, now, forceImmediate);
@@ -82,6 +122,14 @@ export class CampaignSchedulerService {
   }
 
   private async processCampaign(campaign: any, now: Date, forceImmediate: boolean) {
+    // 0. Schedule safety check — do not dispatch if scheduled start time is in the future
+    if (campaign.scheduledFor && new Date(campaign.scheduledFor) > now && !forceImmediate) {
+      this.logger.debug(
+        `Campaign "${campaign.title}" scheduled for future (${campaign.scheduledFor}). Skipping.`,
+      );
+      return;
+    }
+
     // 1. Sending window check
     if (!forceImmediate && !this.isWithinSendingWindow(campaign, now)) {
       return;

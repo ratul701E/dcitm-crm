@@ -94,7 +94,7 @@ export class CampaignsService {
       const campaign = await tx.campaign.create({
         data: {
           title: dto.title,
-          status: dto.status || CampaignStatus.DRAFT,
+          status: dto.status || (dto.scheduledFor ? CampaignStatus.SCHEDULED : CampaignStatus.DRAFT),
           targetTimezone: dto.targetTimezone || 'UTC',
           dailyWindowStart: dto.dailyWindowStart || '09:00',
           dailyWindowEnd: dto.dailyWindowEnd || '17:00',

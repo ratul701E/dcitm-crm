@@ -58,34 +58,91 @@ export class AnalyticsService {
     });
 
     if (rollups.length > 0) {
-      return rollups.map((r) => ({
-        date: r.date.toISOString().split('T')[0],
-        sent: r.sentCount,
-        delivered: r.deliveredCount,
-        opened: r.openCount,
-        clicked: r.clickCount,
-        replied: r.replyCount,
-        bounced: r.bounceCount,
-      }));
+      return rollups.map((r) => {
+        const sent = r.sentCount;
+        const delivered = r.deliveredCount;
+        const deliveryRate = sent > 0 ? Number(((delivered / sent) * 100).toFixed(1)) : 100;
+        return {
+          date: r.date.toISOString().split('T')[0],
+          sent,
+          dispatched: sent,
+          delivered,
+          deliveryRate,
+          opened: r.openCount,
+          clicked: r.clickCount,
+          replied: r.replyCount,
+          bounced: r.bounceCount,
+        };
+      });
     }
 
-    // Fallback: generate recent day buckets
-    const result = [];
+    // Dynamic aggregation from EmailLog if rollups are not populated
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    cutoff.setHours(0, 0, 0, 0);
+
+    const logs = await this.prisma.emailLog.findMany({
+      where: {
+        createdAt: { gte: cutoff },
+      },
+      select: {
+        createdAt: true,
+        sentAt: true,
+        status: true,
+        openCount: true,
+        clickCount: true,
+      },
+    });
+
+    const dayMap = new Map<
+      string,
+      { sent: number; delivered: number; bounced: number; opened: number; clicked: number }
+    >();
+
     const now = new Date();
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
+      dayMap.set(dateStr, { sent: 0, delivered: 0, bounced: 0, opened: 0, clicked: 0 });
+    }
+
+    for (const log of logs) {
+      const targetDate = (log.sentAt || log.createdAt).toISOString().split('T')[0];
+      const entry = dayMap.get(targetDate);
+      if (entry) {
+        if (log.status === 'SENT' || log.status === 'DELIVERED') {
+          entry.sent++;
+          entry.delivered++;
+        } else if (log.status === 'BOUNCED') {
+          entry.sent++;
+          entry.bounced++;
+        }
+        if (log.openCount > 0) entry.opened++;
+        if (log.clickCount > 0) entry.clicked++;
+      }
+    }
+
+    const result = [];
+    for (const [dateStr, data] of dayMap.entries()) {
+      const deliveredCount = Math.max(0, data.sent - data.bounced);
+      const deliveryRate = data.sent > 0
+        ? Number(((deliveredCount / data.sent) * 100).toFixed(1))
+        : 100;
+
       result.push({
         date: dateStr,
-        sent: 0,
-        delivered: 0,
-        opened: 0,
-        clicked: 0,
+        sent: data.sent,
+        dispatched: data.sent,
+        delivered: deliveredCount,
+        deliveryRate,
+        opened: data.opened,
+        clicked: data.clicked,
         replied: 0,
-        bounced: 0,
+        bounced: data.bounced,
       });
     }
+
     return result;
   }
 

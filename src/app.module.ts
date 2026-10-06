@@ -27,6 +27,7 @@ import { TemplatesModule } from './modules/templates/templates.module';
 import { SegmentsModule } from './modules/segments/segments.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     SegmentsModule,
     AnalyticsModule,
     DashboardModule,
+    SearchModule,
   ],
 })
 export class AppModule {}

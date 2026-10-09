@@ -9,6 +9,7 @@ import { ProviderAdaptersService } from '../dispatcher/provider-adapters.service
 import { SuppressionService } from '../suppression/suppression.service';
 import { UpdateReplyCategoryDto, SendManualReplyDto } from './dto/unibox.dto';
 import { ReplyCategory, SuppressionReason } from '@prisma/client';
+import { InboundSyncService } from '../inbound/inbound-sync.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -18,6 +19,7 @@ export class UniboxService {
     private readonly mailboxesService: MailboxesService,
     private readonly adapters: ProviderAdaptersService,
     private readonly suppressionService: SuppressionService,
+    private readonly inboundSyncService: InboundSyncService,
   ) {}
 
   /**
@@ -208,5 +210,15 @@ export class UniboxService {
       where: { id: replyId },
       data: { status },
     });
+  }
+
+  /**
+   * Trigger on-demand sync of inbound emails across all or a specific mailbox
+   */
+  async syncInbound(mailboxId?: string) {
+    if (mailboxId) {
+      return this.inboundSyncService.syncMailboxById(mailboxId);
+    }
+    return this.inboundSyncService.syncAllMailboxes();
   }
 }

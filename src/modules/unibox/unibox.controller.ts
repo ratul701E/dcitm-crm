@@ -108,4 +108,20 @@ export class UniboxController {
   ) {
     return this.uniboxService.updateStatus(id, body?.status || 'active');
   }
+
+  @Post('sync')
+  @ApiOperation({ summary: 'Trigger on-demand IMAP sync across all active mailboxes' })
+  @ApiResponse({ status: 200, description: 'Inbound sync completed' })
+  syncInbound() {
+    return this.uniboxService.syncInbound();
+  }
+
+  @Post('sync/:mailboxId')
+  @ApiOperation({ summary: 'Trigger on-demand IMAP sync for a specific mailbox' })
+  @ApiParam({ name: 'mailboxId', description: 'Mailbox UUID' })
+  @ApiResponse({ status: 200, description: 'Mailbox inbound sync completed' })
+  syncMailboxInbound(@Param('mailboxId') mailboxId: string) {
+    return this.uniboxService.syncInbound(mailboxId);
+  }
 }
+

@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { ImapFlow } from 'imapflow';
 import { SmtpImapConfigDto } from './dto/mailbox.dto';
 
 @Injectable()
@@ -21,6 +22,9 @@ export class SmtpValidatorService {
           pass: config.smtpPass,
         },
         connectionTimeout: 10000,
+        tls: {
+          rejectUnauthorized: false,
+        },
       });
 
       await transporter.verify();
@@ -30,4 +34,45 @@ export class SmtpValidatorService {
       throw new BadRequestException(`SMTP validation failed: ${err.message}`);
     }
   }
+
+  /**
+   * Verifies IMAP connection and authentication
+   */
+  async verifyImap(config: SmtpImapConfigDto): Promise<boolean> {
+    if (!config.imapHost) {
+      return true;
+    }
+
+    const isSecure = config.imapPort === 993 || config.imapSecurity === 'ssl';
+    const client = new ImapFlow({
+      host: config.imapHost,
+      port: config.imapPort || 993,
+      secure: isSecure,
+      auth: {
+        user: config.imapUser || config.smtpUser,
+        pass: config.imapPass || config.smtpPass,
+      },
+      logger: false,
+      connectionTimeout: 12000,
+      greetingTimeout: 8000,
+      socketTimeout: 15000,
+      tls: {
+        rejectUnauthorized: false,
+      },
+    });
+
+    client.on('error', (err: any) => {
+      this.logger.warn(`IMAP verification socket error for ${config.imapUser || config.smtpUser}: ${err?.message || err}`);
+    });
+
+    try {
+      await client.connect();
+      await client.logout();
+      return true;
+    } catch (err: any) {
+      this.logger.warn(`IMAP validation failed for ${config.imapUser || config.smtpUser}: ${err.message}`);
+      throw new BadRequestException(`IMAP validation failed: ${err.message}`);
+    }
+  }
 }
+

@@ -5,8 +5,10 @@ import { MailboxesModule } from '../mailboxes/mailboxes.module';
 import { DispatcherModule } from '../dispatcher/dispatcher.module';
 import { SuppressionModule } from '../suppression/suppression.module';
 
+import { InboundModule } from '../inbound/inbound.module';
+
 @Module({
-  imports: [MailboxesModule, DispatcherModule, SuppressionModule],
+  imports: [MailboxesModule, DispatcherModule, SuppressionModule, InboundModule],
   controllers: [UniboxController],
   providers: [UniboxService],
   exports: [UniboxService],

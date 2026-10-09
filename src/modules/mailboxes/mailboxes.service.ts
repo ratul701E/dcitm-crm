@@ -73,6 +73,10 @@ export class MailboxesService {
       }
       // Validate SMTP connection with STARTTLS
       await this.smtpValidator.verifySmtp(dto.smtpImapConfig);
+      // Validate IMAP connection
+      if (dto.smtpImapConfig.imapHost) {
+        await this.smtpValidator.verifyImap(dto.smtpImapConfig);
+      }
       rawConfigToEncrypt = dto.smtpImapConfig;
     } else if (dto.type === MailboxType.GOOGLE || dto.type === MailboxType.MICROSOFT) {
       if (!dto.oauthConfig) {
@@ -306,6 +310,21 @@ export class MailboxesService {
         }
       }
 
+      // Verify IMAP if credentials or host changed
+      if (
+        (dto.smtpImapConfig.imapPass && dto.smtpImapConfig.imapPass.trim()) ||
+        dto.smtpImapConfig.imapHost !== currentConfig.imapHost ||
+        dto.smtpImapConfig.imapUser !== currentConfig.imapUser
+      ) {
+        if (mergedConfig.imapHost) {
+          try {
+            await this.smtpValidator.verifyImap(mergedConfig);
+          } catch (err: any) {
+            this.logger.warn(`IMAP verification on update returned warning: ${err?.message}`);
+          }
+        }
+      }
+
       encryptedConfigUpdate = this.vault.encrypt(mergedConfig);
     }
 
@@ -359,8 +378,11 @@ export class MailboxesService {
       const config = await this.getDecryptedConfig(id);
       if (mailbox.type === MailboxType.SMTP_IMAP) {
         await this.smtpValidator.verifySmtp(config);
+        if (config?.imapHost) {
+          await this.smtpValidator.verifyImap(config);
+        }
       }
-      return { success: true, message: 'Connection verified successfully' };
+      return { success: true, message: 'SMTP and IMAP connections verified successfully' };
     } catch (err: any) {
       return { success: false, message: err?.message || 'Failed to verify connection' };
     }

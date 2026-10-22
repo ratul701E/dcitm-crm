@@ -317,22 +317,28 @@ model CampaignLeadList {
 }
 
 model CampaignRecipient {
-  id         String   @id @default(uuid())
-  campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  leadId     String
-  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  id                    String    @id @default(uuid())
+  campaignId            String
+  campaign              Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId                String
+  lead                  Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
-  email      String
-  firstName  String?
-  lastName   String?
-  company    String?
+  email                 String
+  firstName             String?
+  lastName              String?
+  company               String?
 
-  createdAt  DateTime @default(now())
+  currentPhaseOrder     Int       @default(1)
+  phaseDeliveryStatus   String    @default("PENDING")
+  nextPhaseScheduledAt  DateTime?
+  lastPhaseSentAt       DateTime?
+
+  createdAt             DateTime  @default(now())
 
   @@unique([campaignId, leadId])
   @@index([campaignId])
   @@index([leadId])
+  @@index([campaignId, currentPhaseOrder])
 }
 
 model Sequence {
@@ -350,9 +356,13 @@ model SequenceStep {
   id          String            @id @default(uuid())
   sequenceId  String
   sequence    Sequence          @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  title       String            @default("")
   stepOrder   Int               // 1, 2, 3...
   delayDays   Int               @default(3)
   delayHours  Int               @default(0)
+  status      String            @default("ACTIVE")
+  isArchived  Boolean           @default(false)
+  deletedAt   DateTime?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
@@ -360,6 +370,7 @@ model SequenceStep {
   emailLogs   EmailLog[]
 
   @@unique([sequenceId, stepOrder])
+  @@index([sequenceId, isArchived])
 }
 
 model SequenceVariant {
@@ -377,36 +388,39 @@ model SequenceVariant {
 }
 
 model EmailLog {
-  id                String             @id @default(uuid())
-  messageId         String?            @unique // RFC 2822 Message-ID
-  campaignId        String
-  campaign          Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  sequenceStepId    String?
-  sequenceStep      SequenceStep?      @relation(fields: [sequenceStepId], references: [id], onDelete: SetNull)
-  sequenceVariantId String?
-  sequenceVariant   SequenceVariant?   @relation(fields: [sequenceVariantId], references: [id], onDelete: SetNull)
-  mailboxId         String
-  mailbox           Mailbox            @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
-  leadId            String
-  lead              Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  id                 String              @id @default(uuid())
+  messageId          String?             @unique // RFC 2822 Message-ID
+  campaignId         String
+  campaign           Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sequenceStepId     String?
+  sequenceStep       SequenceStep?       @relation(fields: [sequenceStepId], references: [id], onDelete: SetNull)
+  sequenceVariantId  String?
+  sequenceVariant    SequenceVariant?    @relation(fields: [sequenceVariantId], references: [id], onDelete: SetNull)
+  phaseOrderSnapshot Int?
+  phaseTitleSnapshot String?
+  mailboxId          String
+  mailbox            Mailbox             @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  leadId             String
+  lead               Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
   
-  status            EmailDispatchStatus @default(PENDING)
-  openedAt          DateTime?
-  openCount         Int                @default(0)
-  clickedAt         DateTime?
-  clickCount        Int                @default(0)
-  bounceReason      String?
-  retryCount        Int                @default(0)
-  sentAt            DateTime?
-  createdAt         DateTime           @default(now())
+  status             EmailDispatchStatus @default(PENDING)
+  openedAt           DateTime?
+  openCount          Int                 @default(0)
+  clickedAt          DateTime?
+  clickCount         Int                 @default(0)
+  bounceReason       String?
+  retryCount         Int                 @default(0)
+  sentAt             DateTime?
+  createdAt          DateTime            @default(now())
 
-  inboundReplies    InboundReply[]
+  inboundReplies     InboundReply[]
 
   @@index([messageId])
   @@index([campaignId])
   @@index([mailboxId])
   @@index([leadId])
   @@index([status])
+  @@index([campaignId, sequenceStepId])
 }
 
 model InboundReply {

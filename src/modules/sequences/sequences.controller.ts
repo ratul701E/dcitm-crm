@@ -16,7 +16,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { SequencesService } from './sequences.service';
-import { CreateStepDto, UpdateStepDto } from './dto/sequence.dto';
+import { CreateStepDto, UpdateStepDto, ReorderStepsDto } from './dto/sequence.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -50,6 +50,19 @@ export class SequencesController {
     @Body() dto: CreateStepDto,
   ) {
     return this.sequencesService.addStep(campaignId, dto);
+  }
+
+  @Post('campaign/:campaignId/reorder')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Reorder steps within a sequence' })
+  @ApiParam({ name: 'campaignId', description: 'Associated Campaign UUID' })
+  @ApiResponse({ status: 200, description: 'Steps reordered successfully' })
+  @ApiResponse({ status: 400, description: 'Validation error' })
+  reorderSteps(
+    @Param('campaignId') campaignId: string,
+    @Body() dto: ReorderStepsDto,
+  ) {
+    return this.sequencesService.reorderSteps(campaignId, dto.stepIds);
   }
 
   @Patch('steps/:stepId')

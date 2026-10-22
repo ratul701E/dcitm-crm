@@ -23,8 +23,8 @@ import { CampaignStatus, LeadStatus } from '@prisma/client';
 describe('Campaign Recipient Snapshot & Immutability', () => {
   let service: CampaignsService;
 
-  const mockPrisma = {
-    $transaction: jest.fn(async (cb) => cb(mockPrisma)),
+  const mockPrisma: any = {
+    $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
     campaign: {
       create: jest.fn(),
       findUnique: jest.fn(),

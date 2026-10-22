@@ -169,13 +169,16 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // 4. Fetch Variant and Campaign details
-    const [variant, campaign] = await Promise.all([
+    // 4. Fetch Variant, Campaign, and Step details
+    const [variant, campaign, step] = await Promise.all([
       this.prisma.sequenceVariant.findUnique({
         where: { id: sequenceVariantId },
       }),
       this.prisma.campaign.findUnique({
         where: { id: campaignId },
+      }),
+      this.prisma.sequenceStep.findUnique({
+        where: { id: sequenceStepId },
       }),
     ]);
 
@@ -186,13 +189,15 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
     const domainHost = mailbox.email.split('@')[1] || 'outreach.internal';
     const messageId = `${Date.now()}.${uniqueHash}@${domainHost}`;
 
-    // 5. Create initial EmailLog record
+    // 5. Create initial EmailLog record with phase snapshot
     const emailLog = await this.prisma.emailLog.create({
       data: {
         messageId,
         campaignId,
         sequenceStepId,
         sequenceVariantId,
+        phaseOrderSnapshot: stepOrder,
+        phaseTitleSnapshot: step?.title || `Phase ${stepOrder}`,
         mailboxId: mailbox.id,
         leadId: lead.id,
         status: EmailDispatchStatus.PENDING,
@@ -291,6 +296,7 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
         where: {
           sequence: { campaignId },
           stepOrder: stepOrder + 1,
+          isArchived: false,
         },
       });
 
@@ -299,6 +305,18 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
         const nextDate = new Date();
         nextDate.setDate(nextDate.getDate() + nextStep.delayDays);
         nextDate.setHours(nextDate.getHours() + nextStep.delayHours);
+
+        // Update CampaignRecipient with next phase schedule
+        await this.prisma.campaignRecipient.updateMany({
+          where: { campaignId, leadId: lead.id },
+          data: {
+            currentPhaseOrder: stepOrder + 1,
+            phaseDeliveryStatus: 'PENDING',
+            nextPhaseScheduledAt: nextDate,
+            lastPhaseSentAt: new Date(),
+          },
+        });
+
         await this.prisma.lead.update({
           where: { id: lead.id },
           data: {
@@ -307,8 +325,17 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
           },
         });
       } else {
-        // All steps for this campaign sent — set nextScheduledAt to null
-        // Do NOT mark COMPLETED globally so this lead remains eligible for other campaigns
+        // All steps for this campaign sent — mark phase complete
+        await this.prisma.campaignRecipient.updateMany({
+          where: { campaignId, leadId: lead.id },
+          data: {
+            currentPhaseOrder: stepOrder,
+            phaseDeliveryStatus: 'COMPLETED',
+            nextPhaseScheduledAt: null,
+            lastPhaseSentAt: new Date(),
+          },
+        });
+
         await this.prisma.lead.update({
           where: { id: lead.id },
           data: {
@@ -328,6 +355,13 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
           bounceReason: err.message,
         },
       });
+      await this.prisma.campaignRecipient.updateMany({
+        where: { campaignId, leadId: lead.id },
+        data: {
+          phaseDeliveryStatus: 'FAILED',
+          nextPhaseScheduledAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minute backoff
+        },
+      }).catch(() => null);
       await this.prisma.lead.update({
         where: { id: lead.id },
         data: {

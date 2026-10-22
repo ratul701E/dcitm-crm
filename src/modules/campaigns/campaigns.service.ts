@@ -72,6 +72,8 @@ export class CampaignsService {
           firstName: lead.firstName,
           lastName: lead.lastName,
           company: lead.company,
+          currentPhaseOrder: 1,
+          phaseDeliveryStatus: 'PENDING',
         });
       }
     }
@@ -168,14 +170,43 @@ export class CampaignsService {
         },
       });
 
-      // If email content was provided in the wizard, persist it as step 1 immediately
-      if (dto.subject || dto.emailBody) {
+      // Multi-phase creation support
+      if (dto.phases && dto.phases.length > 0) {
+        for (let idx = 0; idx < dto.phases.length; idx++) {
+          const p = dto.phases[idx];
+          const stepOrder = p.stepOrder ?? idx + 1;
+          const step = await tx.sequenceStep.create({
+            data: {
+              sequenceId: sequence.id,
+              title: p.title?.trim() || `Phase ${stepOrder}`,
+              stepOrder,
+              delayDays: p.delayDays !== undefined ? p.delayDays : 0,
+              delayHours: p.delayHours !== undefined ? p.delayHours : 0,
+              status: 'ACTIVE',
+              isArchived: false,
+            },
+          });
+          await tx.sequenceVariant.create({
+            data: {
+              sequenceStepId: step.id,
+              variantKey: 'A',
+              subject: p.subject,
+              body: p.emailBody,
+              weight: 100,
+            },
+          });
+        }
+      } else if (dto.subject || dto.emailBody) {
+        // Fallback for legacy single-phase campaigns
         const step = await tx.sequenceStep.create({
           data: {
             sequenceId: sequence.id,
+            title: 'Phase 1',
             stepOrder: 1,
             delayDays: 0,
             delayHours: 0,
+            status: 'ACTIVE',
+            isArchived: false,
           },
         });
         await tx.sequenceVariant.create({
@@ -192,8 +223,14 @@ export class CampaignsService {
       return campaign;
     }, { timeout: 30000 });
 
-    // Prime lead nextScheduledAt outside the transaction to avoid timeout on large lists
+    // Prime participant and lead nextScheduledAt outside the transaction
     if (dto.status === CampaignStatus.ACTIVE) {
+      await this.prisma.campaignRecipient.updateMany({
+        where: { campaignId: created.id },
+        data: {
+          nextPhaseScheduledAt: new Date(),
+        },
+      });
       await this.prisma.lead.updateMany({
         where: {
           campaignRecipients: { some: { campaignId: created.id } },
@@ -351,6 +388,7 @@ export class CampaignsService {
         sequences: {
           include: {
             steps: {
+              where: { isArchived: false },
               orderBy: { stepOrder: 'asc' },
               include: { variants: true },
             },
@@ -361,6 +399,9 @@ export class CampaignsService {
           select: {
             id: true,
             leadId: true,
+            sequenceStepId: true,
+            phaseOrderSnapshot: true,
+            phaseTitleSnapshot: true,
             status: true,
             sentAt: true,
             openedAt: true,
@@ -823,6 +864,8 @@ export class CampaignsService {
 
     const throttleStatus = await this.getCampaignThrottleStatus(id).catch(() => ({ isThrottled: false }));
 
+    const phaseSummary = await this.getPhaseStats(id).catch(() => ({ phases: [], activePhaseOrder: 1 }));
+
     return {
       totalRecipients,
       sent,
@@ -844,6 +887,188 @@ export class CampaignsService {
       clickRate: sent > 0 ? Number(((clicked / sent) * 100).toFixed(1)) : 0,
       replyRate: sent > 0 ? Number(((replies / sent) * 100).toFixed(1)) : 0,
       bounceRate: sent > 0 ? Number(((bounced / sent) * 100).toFixed(1)) : 0,
+      phases: phaseSummary.phases,
+      activePhaseOrder: phaseSummary.activePhaseOrder,
+    };
+  }
+
+  /**
+   * Phase-level analytics and participant progress tracking
+   */
+  async getPhaseStats(id: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: {
+        sequences: {
+          include: {
+            steps: {
+              where: { isArchived: false },
+              orderBy: { stepOrder: 'asc' },
+              include: { variants: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!campaign) {
+      throw new NotFoundException('Campaign not found');
+    }
+
+    const sequence = campaign.sequences[0];
+    const steps = sequence?.steps || [];
+
+    const totalAudience = await this.prisma.campaignRecipient.count({
+      where: { campaignId: id },
+    });
+
+    const phaseStats = await Promise.all(
+      steps.map(async (step) => {
+        const [sent, delivered, opened, clicked, bounced, failed] = await Promise.all([
+          this.prisma.emailLog.count({
+            where: {
+              campaignId: id,
+              OR: [{ sequenceStepId: step.id }, { phaseOrderSnapshot: step.stepOrder }],
+              status: { in: ['SENT', 'DELIVERED'] },
+            },
+          }),
+          this.prisma.emailLog.count({
+            where: {
+              campaignId: id,
+              OR: [{ sequenceStepId: step.id }, { phaseOrderSnapshot: step.stepOrder }],
+              status: 'DELIVERED',
+            },
+          }),
+          this.prisma.emailLog.count({
+            where: {
+              campaignId: id,
+              OR: [{ sequenceStepId: step.id }, { phaseOrderSnapshot: step.stepOrder }],
+              openCount: { gt: 0 },
+            },
+          }),
+          this.prisma.emailLog.count({
+            where: {
+              campaignId: id,
+              OR: [{ sequenceStepId: step.id }, { phaseOrderSnapshot: step.stepOrder }],
+              clickCount: { gt: 0 },
+            },
+          }),
+          this.prisma.emailLog.count({
+            where: {
+              campaignId: id,
+              OR: [{ sequenceStepId: step.id }, { phaseOrderSnapshot: step.stepOrder }],
+              status: 'BOUNCED',
+            },
+          }),
+          this.prisma.emailLog.count({
+            where: {
+              campaignId: id,
+              OR: [{ sequenceStepId: step.id }, { phaseOrderSnapshot: step.stepOrder }],
+              status: 'FAILED',
+            },
+          }),
+        ]);
+
+        const replied = await this.prisma.inboundReply.count({
+          where: {
+            emailLog: {
+              campaignId: id,
+              OR: [{ sequenceStepId: step.id }, { phaseOrderSnapshot: step.stepOrder }],
+            },
+          },
+        });
+
+        // Determine participant progress counts for this phase
+        const [completedRecipients, inProgressRecipients, failedRecipients] = await Promise.all([
+          this.prisma.campaignRecipient.count({
+            where: {
+              campaignId: id,
+              OR: [
+                { currentPhaseOrder: { gt: step.stepOrder } },
+                {
+                  currentPhaseOrder: step.stepOrder,
+                  phaseDeliveryStatus: { in: ['SENT', 'DELIVERED', 'COMPLETED'] },
+                },
+              ],
+            },
+          }),
+          this.prisma.campaignRecipient.count({
+            where: {
+              campaignId: id,
+              currentPhaseOrder: step.stepOrder,
+              phaseDeliveryStatus: { in: ['PENDING', 'SENDING'] },
+            },
+          }),
+          this.prisma.campaignRecipient.count({
+            where: {
+              campaignId: id,
+              currentPhaseOrder: step.stepOrder,
+              phaseDeliveryStatus: { in: ['FAILED', 'BOUNCED'] },
+            },
+          }),
+        ]);
+
+        let phaseStatus = 'UPCOMING';
+        if (totalAudience > 0 && completedRecipients >= totalAudience) {
+          phaseStatus = 'COMPLETED';
+        } else if (sent > 0 || inProgressRecipients > 0) {
+          phaseStatus = 'ACTIVE';
+        }
+
+        const primaryVariant = step.variants[0];
+
+        return {
+          phaseId: step.id,
+          stepOrder: step.stepOrder,
+          title: step.title || `Phase ${step.stepOrder}`,
+          subject: primaryVariant?.subject || '',
+          body: primaryVariant?.body || '',
+          delayDays: step.delayDays,
+          delayHours: step.delayHours,
+          status: phaseStatus,
+          isArchived: step.isArchived,
+          stats: {
+            sent,
+            delivered,
+            opened,
+            clicked,
+            replied,
+            bounced,
+            failed,
+            sentCount: sent,
+            deliveredCount: delivered,
+            openCount: opened,
+            clickCount: clicked,
+            replyCount: replied,
+            bounceCount: bounced,
+            failedCount: failed,
+            openRate: sent > 0 ? Number(((opened / sent) * 100).toFixed(1)) : 0,
+            clickRate: sent > 0 ? Number(((clicked / sent) * 100).toFixed(1)) : 0,
+            replyRate: sent > 0 ? Number(((replied / sent) * 100).toFixed(1)) : 0,
+            bounceRate: sent > 0 ? Number(((bounced / sent) * 100).toFixed(1)) : 0,
+          },
+          participantProgress: {
+            totalAudience,
+            completed: completedRecipients,
+            inProgress: inProgressRecipients,
+            failed: failedRecipients,
+            eligibleForNext: Math.max(0, completedRecipients - bounced - replied),
+          },
+        };
+      }),
+    );
+
+    const activePhase =
+      phaseStats.find((p) => p.status === 'ACTIVE') ||
+      phaseStats.find((p) => p.status === 'UPCOMING') ||
+      phaseStats[phaseStats.length - 1] ||
+      null;
+
+    return {
+      campaignId: id,
+      totalPhases: phaseStats.length,
+      activePhaseOrder: activePhase?.stepOrder ?? 1,
+      phases: phaseStats,
     };
   }
 

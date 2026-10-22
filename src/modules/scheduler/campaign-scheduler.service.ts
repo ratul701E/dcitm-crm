@@ -99,6 +99,7 @@ export class CampaignSchedulerService {
           sequences: {
             include: {
               steps: {
+                where: { isArchived: false, status: 'ACTIVE' },
                 orderBy: { stepOrder: 'asc' },
                 include: { variants: true },
               },
@@ -410,10 +411,10 @@ export class CampaignSchedulerService {
   ): number | null {
     if (sequenceSteps.length === 0) return null;
 
-    // Find the highest stepOrder that has a SENT or DELIVERED log
+    // Find the highest stepOrder that has a SENT or DELIVERED log (fallback to phaseOrderSnapshot)
     const sentStepOrders = campaignLogs
       .filter((l) => l.status === 'SENT' || l.status === 'DELIVERED')
-      .map((l) => l.sequenceStep?.stepOrder ?? 0)
+      .map((l) => l.sequenceStep?.stepOrder ?? (l as any).phaseOrderSnapshot ?? 0)
       .filter((o) => o > 0);
 
     if (sentStepOrders.length === 0) {

@@ -105,9 +105,30 @@ export const CreateCampaignSchema = z
       .array(z.string())
       .optional()
       .describe('Array of enrolled lead list UUIDs'),
-    // Email content — persisted as sequence step + variant on creation
-    subject: z.string().optional().describe('Email subject line for the first sequence step'),
-    emailBody: z.string().optional().describe('HTML email body for the first sequence step'),
+    // Email content — persisted as sequence step + variant on creation (legacy single-phase support)
+    subject: z.string().optional().describe('Email subject line for single-phase campaigns'),
+    emailBody: z.string().optional().describe('HTML email body for single-phase campaigns'),
+    // Multi-phase email system support
+    phases: z
+      .array(
+        z.object({
+          title: z.string().optional().describe('Phase title (e.g. Phase 1: Initial Pitch)'),
+          stepOrder: z.number().int().min(1).optional().describe('Phase order index (1, 2, 3...)'),
+          delayDays: z.number().int().min(0).default(0).optional().describe('Delay in days after previous phase'),
+          delayHours: z
+            .number()
+            .int()
+            .min(0)
+            .max(23)
+            .default(0)
+            .optional()
+            .describe('Delay in hours after previous phase'),
+          subject: z.string().min(1, 'Subject line is required'),
+          emailBody: z.string().min(1, 'Email body is required'),
+        }),
+      )
+      .optional()
+      .describe('Ordered campaign phases with dedicated email content and intervals'),
   })
   .refine(
     (data) => {

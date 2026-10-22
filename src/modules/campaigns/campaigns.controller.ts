@@ -98,6 +98,14 @@ export class CampaignsController {
     return this.campaignsService.getStats(id);
   }
 
+  @Get(':id/phases/stats')
+  @ApiOperation({ summary: 'Get phase-by-phase performance statistics and progress' })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiResponse({ status: 200, description: 'Campaign phase statistics' })
+  getPhaseStats(@Param('id') id: string) {
+    return this.campaignsService.getPhaseStats(id);
+  }
+
   @Post(':id/trigger')
   @Roles(UserRole.ADMIN, UserRole.MEMBER)
   @ApiOperation({ summary: 'Trigger immediate schedule evaluation and dispatch for a campaign' })

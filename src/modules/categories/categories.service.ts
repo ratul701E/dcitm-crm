@@ -475,8 +475,13 @@ export class CategoriesService {
       throw new BadRequestException('Only Level 2 Subcategories can be moved to another industry.');
     }
 
+    const targetParentId = dto.targetParentId || (dto as any).newParentId;
+    if (!targetParentId) {
+      throw new BadRequestException('Target parent industry ID is required.');
+    }
+
     const targetIndustry = await this.prisma.category.findUnique({
-      where: { id: dto.targetParentId },
+      where: { id: targetParentId },
     });
     if (!targetIndustry || targetIndustry.level !== 1) {
       throw new BadRequestException('Target category must be a Level 1 Industry.');
@@ -534,14 +539,19 @@ export class CategoriesService {
    * Batch reorders sibling categories (industries or subcategories)
    */
   async reorderCategories(dto: ReorderCategoriesDto) {
-    const updates = dto.orderedIds.map((id, index) =>
+    const ids =
+      dto.orderedIds ||
+      ((dto as any).items
+        ? [...(dto as any).items].sort((a: any, b: any) => a.sortOrder - b.sortOrder).map((i: any) => i.id)
+        : []);
+    const updates = ids.map((id, index) =>
       this.prisma.category.update({
         where: { id },
         data: { sortOrder: index },
       }),
     );
     await this.prisma.$transaction(updates);
-    return { success: true, reorderedCount: dto.orderedIds.length };
+    return { success: true, reorderedCount: ids.length };
   }
 
   /**
@@ -564,7 +574,7 @@ export class CategoriesService {
       throw new NotFoundException(`Category with ID ${id} not found`);
     }
 
-    if (dto.confirmationName.trim().toLowerCase() !== category.name.trim().toLowerCase()) {
+    if (dto.confirmationName && dto.confirmationName.trim().toLowerCase() !== category.name.trim().toLowerCase()) {
       throw new BadRequestException(
         `Confirmation name "${dto.confirmationName}" does not match category name "${category.name}".`,
       );
@@ -579,15 +589,20 @@ export class CategoriesService {
       select: { id: true, title: true, status: true },
     });
 
+    const isMoveSubcategories =
+      dto.resolutionOption === 'MOVE_SUBCATEGORIES_TO_ANOTHER_INDUSTRY' ||
+      dto.strategy === 'REASSIGN_TO_PARENT';
+    const resolvedTargetIndustryId = dto.targetIndustryId || dto.targetCategoryId;
+
     await this.prisma.$transaction(async (tx) => {
       if (category.level === 1) {
         // Deleting an Industry
-        if (dto.resolutionOption === 'MOVE_SUBCATEGORIES_TO_ANOTHER_INDUSTRY') {
-          if (!dto.targetIndustryId) {
+        if (isMoveSubcategories) {
+          if (!resolvedTargetIndustryId) {
             throw new BadRequestException('Target industry ID is required to move subcategories.');
           }
           const target = await tx.category.findUnique({
-            where: { id: dto.targetIndustryId },
+            where: { id: resolvedTargetIndustryId },
           });
           if (!target || target.level !== 1 || target.id === id) {
             throw new BadRequestException('Invalid target industry.');
@@ -668,13 +683,20 @@ export class CategoriesService {
     let targetParentCategoryId: string | null = null;
     let targetCategoryName = 'Unassigned lists';
 
-    if (dto.targetParentCategoryId) {
+    const resolvedTargetParentId =
+      dto.targetParentCategoryId !== undefined
+        ? dto.targetParentCategoryId
+        : ((dto as any).parentCategoryId !== undefined
+            ? (dto as any).parentCategoryId
+            : (dto as any).newParentId);
+
+    if (resolvedTargetParentId) {
       const targetCategory = await this.prisma.category.findUnique({
-        where: { id: dto.targetParentCategoryId },
+        where: { id: resolvedTargetParentId },
         include: { parent: true },
       });
       if (!targetCategory) {
-        throw new NotFoundException(`Destination category ${dto.targetParentCategoryId} not found`);
+        throw new NotFoundException(`Destination category ${resolvedTargetParentId} not found`);
       }
       if (targetCategory.level === 1) {
         throw new BadRequestException(

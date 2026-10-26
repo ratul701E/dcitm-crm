@@ -60,6 +60,17 @@ export class CategoriesController {
     return this.migrationService.applyMigration(userId);
   }
 
+  @Get('tree')
+  @ApiOperation({
+    summary: 'Get 3-level Category Hierarchy Tree',
+    description: 'Returns all industries, nested subcategories, audience groups, and summary statistics.',
+  })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Hierarchy tree and summary stats returned' })
+  getHierarchyTreeTree(@Query('search') search?: string) {
+    return this.categoriesService.getHierarchyTree(search);
+  }
+
   @Get()
   @ApiOperation({
     summary: 'Get 3-level Category Hierarchy Tree',
@@ -113,6 +124,7 @@ export class CategoriesController {
   }
 
   @Post(':id/move')
+  @Patch(':id/move')
   @Roles(UserRole.ADMIN, UserRole.MEMBER)
   @ApiOperation({
     summary: 'Move subcategory to another industry',
@@ -125,6 +137,7 @@ export class CategoriesController {
   }
 
   @Post('reorder')
+  @Patch('reorder')
   @Roles(UserRole.ADMIN, UserRole.MEMBER)
   @ApiOperation({ summary: 'Batch reorder sibling categories within the same parent or root level' })
   @ApiResponse({ status: 200, description: 'Sort orders updated' })
@@ -145,6 +158,7 @@ export class CategoriesController {
   }
 
   @Post('groups/:id/move')
+  @Patch('groups/:id/move')
   @Roles(UserRole.ADMIN, UserRole.MEMBER)
   @ApiOperation({
     summary: 'Move Audience Group to a subcategory or Unassigned lists',
@@ -157,10 +171,12 @@ export class CategoriesController {
   }
 
   @Post('groups/reorder')
+  @Patch('groups/reorder')
   @Roles(UserRole.ADMIN, UserRole.MEMBER)
   @ApiOperation({ summary: 'Batch reorder audience groups within a subcategory or unassigned list' })
   @ApiResponse({ status: 200, description: 'Sort orders updated' })
-  reorderLeadLists(@Body() body: { orderedIds: string[] }) {
-    return this.categoriesService.reorderLeadLists(body.orderedIds || []);
+  reorderLeadLists(@Body() body: { orderedIds?: string[]; items?: Array<{ id: string; sortOrder: number }> }) {
+    const ids = body.orderedIds || (body.items ? [...body.items].sort((a, b) => a.sortOrder - b.sortOrder).map((i) => i.id) : []);
+    return this.categoriesService.reorderLeadLists(ids);
   }
 }

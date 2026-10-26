@@ -117,6 +117,7 @@ model User {
 
   auditLogs          AuditLog[]
   campaignsCreated   Campaign[]
+  categoriesCreated  Category[]
 
   @@index([email])
 }
@@ -193,17 +194,46 @@ model Mailbox {
   @@index([state])
 }
 
-model LeadList {
-  id          String   @id @default(uuid())
+model Category {
+  id          String             @id @default(uuid())
   name        String
   description String?
-  isSystem    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 
-  leads       Lead[]
-  campaigns   CampaignLeadList[]
+  parentId    String?
+  parent      Category?          @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children    Category[]         @relation("CategoryHierarchy")
 
+  level       Int                @default(1) // 1 = Industry, 2 = Subcategory
+  sortOrder   Int                @default(0)
+
+  createdById String?
+  createdBy   User?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  audienceGroups     LeadList[]         @relation("CategoryAudienceGroups")
+  campaignCategories CampaignCategory[]
+
+  @@unique([parentId, name])
+  @@index([parentId, sortOrder])
+  @@index([level])
+}
+
+model LeadList {
+  id               String             @id @default(uuid())
+  name             String
+  description      String?
+  isSystem         Boolean            @default(false)
+  parentCategoryId String?
+  parentCategory   Category?          @relation("CategoryAudienceGroups", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  sortOrder        Int                @default(0)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  leads            Lead[]
+  campaigns        CampaignLeadList[]
+
+  @@index([parentCategoryId, sortOrder])
   @@index([name])
   @@index([isSystem])
 }
@@ -288,12 +318,13 @@ model Campaign {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-  campaignMailboxes CampaignMailbox[]
-  campaignLeadLists CampaignLeadList[]
-  recipients        CampaignRecipient[]
-  sequences         Sequence[]
-  emailLogs         EmailLog[]
-  analyticsRollups  AnalyticsRollup[]
+  campaignMailboxes  CampaignMailbox[]
+  campaignLeadLists  CampaignLeadList[]
+  campaignCategories CampaignCategory[]
+  recipients         CampaignRecipient[]
+  sequences          Sequence[]
+  emailLogs          EmailLog[]
+  analyticsRollups   AnalyticsRollup[]
 
   @@index([status])
 }
@@ -314,6 +345,19 @@ model CampaignLeadList {
   leadList   LeadList @relation(fields: [leadListId], references: [id], onDelete: Cascade)
 
   @@id([campaignId, leadListId])
+}
+
+model CampaignCategory {
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now())
+
+  @@id([campaignId, categoryId])
+  @@index([campaignId])
+  @@index([categoryId])
 }
 
 model CampaignRecipient {

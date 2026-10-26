@@ -105,6 +105,10 @@ export const CreateCampaignSchema = z
       .array(z.string())
       .optional()
       .describe('Array of enrolled lead list UUIDs'),
+    categoryIds: z
+      .array(z.string())
+      .optional()
+      .describe('Array of targeted Category (Industry or Subcategory) UUIDs'),
     // Email content — persisted as sequence step + variant on creation (legacy single-phase support)
     subject: z.string().optional().describe('Email subject line for single-phase campaigns'),
     emailBody: z.string().optional().describe('HTML email body for single-phase campaigns'),
@@ -207,6 +211,10 @@ export const UpdateCampaignSchema = z
       .array(z.string())
       .optional()
       .describe('Array of enrolled lead list UUIDs'),
+    categoryIds: z
+      .array(z.string())
+      .optional()
+      .describe('Array of targeted Category (Industry or Subcategory) UUIDs'),
   })
   .refine(
     (data) => {
@@ -226,6 +234,14 @@ export const UpdateCampaignSchema = z
   );
 
 export class UpdateCampaignDto extends createZodDto(UpdateCampaignSchema) {}
+
+export const ValidateAudienceSchema = z.object({
+  categoryIds: z.array(z.string()).default([]).optional(),
+  leadListIds: z.array(z.string()).default([]).optional(),
+  excludedLeadListIds: z.array(z.string()).default([]).optional(),
+});
+
+export class ValidateAudienceDto extends createZodDto(ValidateAudienceSchema) {}
 
 export const PreviewDelaysSchema = z
   .object({

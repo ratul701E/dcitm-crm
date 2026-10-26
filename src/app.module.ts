@@ -28,6 +28,7 @@ import { SegmentsModule } from './modules/segments/segments.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SearchModule } from './modules/search/search.module';
+import { CategoriesModule } from './modules/categories/categories.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { SearchModule } from './modules/search/search.module';
     AnalyticsModule,
     DashboardModule,
     SearchModule,
+    CategoriesModule,
   ],
 })
 export class AppModule {}

@@ -15,6 +15,7 @@ import {
   UpdateCampaignDto,
   SendTestEmailDto,
   PreviewDelaysDto,
+  ValidateAudienceDto,
 } from './dto/campaign.dto';
 import { CampaignStatus, DelayMode, LeadStatus, MailboxState } from '@prisma/client';
 import { EmailDelayService } from './email-delay.service';
@@ -32,16 +33,175 @@ export class CampaignsService {
   ) {}
 
   /**
-   * Captures an immutable snapshot of recipient leads from assigned lead lists.
+   * Resolves Category targets (Industries & Subcategories) to their descendant leadListIds
+   */
+  async resolveCategoryLeadListIds(categoryIds: string[]): Promise<string[]> {
+    if (!categoryIds || categoryIds.length === 0) return [];
+
+    const categories = await this.prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      include: {
+        children: {
+          include: {
+            audienceGroups: { select: { id: true } },
+          },
+        },
+        audienceGroups: { select: { id: true } },
+      },
+    });
+
+    const listIdSet = new Set<string>();
+    for (const cat of categories) {
+      if (cat.level === 1) {
+        // Industry: include all groups in all its child subcategories
+        for (const sub of cat.children) {
+          for (const g of sub.audienceGroups) {
+            listIdSet.add(g.id);
+          }
+        }
+      } else {
+        // Subcategory: include all its groups
+        for (const g of cat.audienceGroups) {
+          listIdSet.add(g.id);
+        }
+      }
+    }
+    return Array.from(listIdSet);
+  }
+
+  /**
+   * Validates dynamic audience before send/schedule with deduplication and suppression filtering
+   */
+  async validateAudience(dto: ValidateAudienceDto) {
+    const categoryListIds = await this.resolveCategoryLeadListIds(dto.categoryIds || []);
+    const directListIds = dto.leadListIds || [];
+    const allTargetedListIds = Array.from(new Set([...categoryListIds, ...directListIds]));
+
+    const excludedIds = dto.excludedLeadListIds || [];
+    const validListIds = allTargetedListIds.filter((lid) => !excludedIds.includes(lid));
+
+    if (validListIds.length === 0) {
+      return {
+        recordsCount: 0,
+        duplicatesRemoved: 0,
+        unsubscribedExcluded: 0,
+        finalEligibleCount: 0,
+        excludedContacts: [],
+        totalExcludedCount: 0,
+        validatedAt: new Date().toISOString(),
+        resolvedGroupCount: 0,
+        categoryTargetsCount: dto.categoryIds?.length || 0,
+      };
+    }
+
+    // Fetch all active enrolled leads across the resolved groups
+    const enrolledLeads = await this.prisma.lead.findMany({
+      where: {
+        leadListId: { in: validListIds },
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        company: true,
+        status: true,
+        leadListId: true,
+        leadList: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    const recordsCount = enrolledLeads.length;
+
+    // Check against suppression table as well
+    const suppressionEntries = await this.prisma.suppressionEntry.findMany({
+      select: { value: true, isWildcard: true },
+    });
+    const exactSuppressionSet = new Set(
+      suppressionEntries.filter((s) => !s.isWildcard).map((s) => s.value.trim().toLowerCase()),
+    );
+    const wildcardSuppressionDomains = suppressionEntries
+      .filter((s) => s.isWildcard)
+      .map((s) => s.value.trim().toLowerCase().replace(/^@/, ''));
+
+    let duplicatesRemoved = 0;
+    let unsubscribedExcluded = 0;
+    const seenEmails = new Set<string>();
+    const eligibleLeads: any[] = [];
+    const excludedContacts: any[] = [];
+
+    for (const lead of enrolledLeads) {
+      const emailNorm = lead.email.trim().toLowerCase();
+      const domain = emailNorm.split('@')[1] || '';
+
+      const isSuppressedByTable =
+        exactSuppressionSet.has(emailNorm) ||
+        wildcardSuppressionDomains.some((d) => domain.endsWith(d));
+
+      const isUnsubscribedOrBounced =
+        ([LeadStatus.BOUNCED, LeadStatus.UNSUBSCRIBED, LeadStatus.SUPPRESSED] as LeadStatus[]).includes(lead.status) ||
+        isSuppressedByTable;
+
+      if (isUnsubscribedOrBounced) {
+        unsubscribedExcluded++;
+        excludedContacts.push({
+          email: lead.email,
+          name: [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.company,
+          reason: isSuppressedByTable ? 'SUPPRESSED' : lead.status,
+          listName: lead.leadList?.name,
+        });
+        continue;
+      }
+
+      if (seenEmails.has(emailNorm)) {
+        duplicatesRemoved++;
+        excludedContacts.push({
+          email: lead.email,
+          name: [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.company,
+          reason: 'DUPLICATE',
+          listName: lead.leadList?.name,
+        });
+        continue;
+      }
+
+      seenEmails.add(emailNorm);
+      eligibleLeads.push(lead);
+    }
+
+    return {
+      recordsCount,
+      duplicatesRemoved,
+      unsubscribedExcluded,
+      finalEligibleCount: eligibleLeads.length,
+      excludedContacts: excludedContacts.slice(0, 100),
+      totalExcludedCount: excludedContacts.length,
+      validatedAt: new Date().toISOString(),
+      resolvedGroupCount: validListIds.length,
+      categoryTargetsCount: dto.categoryIds?.length || 0,
+    };
+  }
+
+  /**
+   * Captures an immutable snapshot of recipient leads from assigned lead lists & category targets.
    */
   private async snapshotCampaignRecipients(
     tx: any,
     campaignId: string,
     leadListIds: string[],
     excludedLeadListIds: string[] = [],
+    categoryIds: string[] = [],
   ) {
-    if (!leadListIds || leadListIds.length === 0) return 0;
-    const validListIds = leadListIds.filter((lid) => !excludedLeadListIds.includes(lid));
+    let resolvedListIds = [...leadListIds];
+    if (categoryIds && categoryIds.length > 0) {
+      const categoryDescendantLists = await this.resolveCategoryLeadListIds(categoryIds);
+      resolvedListIds = Array.from(new Set([...resolvedListIds, ...categoryDescendantLists]));
+    }
+
+    if (!resolvedListIds || resolvedListIds.length === 0) return 0;
+    const validListIds = resolvedListIds.filter((lid) => !excludedLeadListIds.includes(lid));
     if (validListIds.length === 0) return 0;
 
     const eligibleLeads = await tx.lead.findMany({
@@ -138,28 +298,51 @@ export class CampaignsService {
         }
       }
 
+      // Attach categories if provided (only existing IDs)
+      let validCategoryIds: string[] = [];
+      if (dto.categoryIds && dto.categoryIds.length > 0) {
+        const validCategories = await tx.category.findMany({
+          where: { id: { in: dto.categoryIds } },
+          select: { id: true },
+        });
+        if (validCategories.length > 0) {
+          validCategoryIds = validCategories.map((c) => c.id);
+          await tx.campaignCategory.createMany({
+            data: validCategoryIds.map((cid) => ({
+              campaignId: campaign.id,
+              categoryId: cid,
+            })),
+          });
+        }
+      }
+
       // Attach lead lists if provided (only existing IDs)
+      let validListIds: string[] = [];
       if (dto.leadListIds && dto.leadListIds.length > 0) {
         const validLeadLists = await tx.leadList.findMany({
           where: { id: { in: dto.leadListIds } },
           select: { id: true },
         });
         if (validLeadLists.length > 0) {
+          validListIds = validLeadLists.map((l) => l.id);
           await tx.campaignLeadList.createMany({
-            data: validLeadLists.map((l) => ({
+            data: validListIds.map((lid) => ({
               campaignId: campaign.id,
-              leadListId: l.id,
+              leadListId: lid,
             })),
           });
-
-          // Snapshot recipients at creation time
-          await this.snapshotCampaignRecipients(
-            tx,
-            campaign.id,
-            validLeadLists.map((l) => l.id),
-            dto.excludedLeadListIds || [],
-          );
         }
+      }
+
+      // Snapshot recipients at creation time
+      if (validListIds.length > 0 || validCategoryIds.length > 0) {
+        await this.snapshotCampaignRecipients(
+          tx,
+          campaign.id,
+          validListIds,
+          dto.excludedLeadListIds || [],
+          validCategoryIds,
+        );
       }
 
       // Automatically create the initial default sequence container
@@ -289,6 +472,18 @@ export class CampaignsService {
             },
           },
         },
+        campaignCategories: {
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                level: true,
+                parentId: true,
+              },
+            },
+          },
+        },
         sequences: {
           include: {
             steps: {
@@ -363,6 +558,18 @@ export class CampaignsService {
                   },
                 },
                 _count: { select: { leads: true } },
+              },
+            },
+          },
+        },
+        campaignCategories: {
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                level: true,
+                parentId: true,
               },
             },
           },
@@ -540,33 +747,63 @@ export class CampaignsService {
         CampaignStatus.FAILED,
       ] as string[]).includes(current.status);
 
-      if (!isCompleted && dto.leadListIds) {
-        await tx.campaignLeadList.deleteMany({ where: { campaignId: id } });
-        if (dto.leadListIds.length > 0) {
-          const validLeadLists = await tx.leadList.findMany({
-            where: { id: { in: dto.leadListIds } },
-            select: { id: true },
-          });
-          if (validLeadLists.length > 0) {
-            await tx.campaignLeadList.createMany({
-              data: validLeadLists.map((l) => ({
-                campaignId: id,
-                leadListId: l.id,
-              })),
+      if (!isCompleted && (dto.leadListIds || dto.categoryIds)) {
+        if (dto.categoryIds) {
+          await tx.campaignCategory.deleteMany({ where: { campaignId: id } });
+          if (dto.categoryIds.length > 0) {
+            const validCategories = await tx.category.findMany({
+              where: { id: { in: dto.categoryIds } },
+              select: { id: true },
             });
-
-            // Resynchronize snapshot if campaign is DRAFT or has sent 0 emails
-            const logsCount = await tx.emailLog.count({ where: { campaignId: id } });
-            if (logsCount === 0) {
-              await tx.campaignRecipient.deleteMany({ where: { campaignId: id } });
-              await this.snapshotCampaignRecipients(
-                tx,
-                id,
-                validLeadLists.map((l) => l.id),
-                dto.excludedLeadListIds || current.excludedLeadListIds || [],
-              );
+            if (validCategories.length > 0) {
+              await tx.campaignCategory.createMany({
+                data: validCategories.map((c) => ({
+                  campaignId: id,
+                  categoryId: c.id,
+                })),
+              });
             }
           }
+        }
+
+        if (dto.leadListIds) {
+          await tx.campaignLeadList.deleteMany({ where: { campaignId: id } });
+          if (dto.leadListIds.length > 0) {
+            const validLeadLists = await tx.leadList.findMany({
+              where: { id: { in: dto.leadListIds } },
+              select: { id: true },
+            });
+            if (validLeadLists.length > 0) {
+              await tx.campaignLeadList.createMany({
+                data: validLeadLists.map((l) => ({
+                  campaignId: id,
+                  leadListId: l.id,
+                })),
+              });
+            }
+          }
+        }
+
+        // Resynchronize snapshot if campaign is DRAFT or has sent 0 emails
+        const logsCount = await tx.emailLog.count({ where: { campaignId: id } });
+        if (logsCount === 0) {
+          const currentLists = await tx.campaignLeadList.findMany({
+            where: { campaignId: id },
+            select: { leadListId: true },
+          });
+          const currentCats = await tx.campaignCategory.findMany({
+            where: { campaignId: id },
+            select: { categoryId: true },
+          });
+
+          await tx.campaignRecipient.deleteMany({ where: { campaignId: id } });
+          await this.snapshotCampaignRecipients(
+            tx,
+            id,
+            currentLists.map((cl: any) => cl.leadListId),
+            dto.excludedLeadListIds || current.excludedLeadListIds || [],
+            currentCats.map((cc: any) => cc.categoryId),
+          );
         }
       }
 

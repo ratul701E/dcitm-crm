@@ -21,6 +21,7 @@ import {
   UpdateCampaignDto,
   SendTestEmailDto,
   PreviewDelaysDto,
+  ValidateAudienceDto,
 } from './dto/campaign.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -50,6 +51,17 @@ export class CampaignsController {
   @ApiResponse({ status: 400, description: 'Validation or dispatch error' })
   sendTestEmail(@Body() dto: SendTestEmailDto) {
     return this.campaignsService.sendTestEmail(dto);
+  }
+
+  @Post('validate-audience')
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({
+    summary: 'Validate dynamic campaign audience with live deduplication and suppression filtering',
+    description: 'Resolves Category and Group targets, removes case-insensitive duplicates, excludes unsubscribed/suppressed contacts, and returns final recipient audit counts.',
+  })
+  @ApiResponse({ status: 200, description: 'Audience validation statistics returned' })
+  validateAudience(@Body() dto: ValidateAudienceDto) {
+    return this.campaignsService.validateAudience(dto);
   }
 
   @Post()

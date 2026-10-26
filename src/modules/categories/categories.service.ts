@@ -207,8 +207,16 @@ export class CategoriesService {
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
           include: {
             audienceGroups: {
+              orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
               select: {
                 id: true,
+                name: true,
+                description: true,
+                isSystem: true,
+                parentCategoryId: true,
+                sortOrder: true,
+                updatedAt: true,
+                createdAt: true,
                 _count: { select: { leads: { where: { deletedAt: null } } } },
               },
             },
@@ -264,6 +272,24 @@ export class CategoriesService {
       const totalGroups = subcategories.reduce((acc, s) => acc + s.groupsCount, 0);
       const totalContacts = subcategories.reduce((acc, s) => acc + s.contactsCount, 0);
 
+      // Collect all audience groups belonging to this industry's subcategories
+      const allIndustryGroups = category.children.flatMap((sub) =>
+        sub.audienceGroups.map((g) => ({
+          id: g.id,
+          name: g.name,
+          description: g.description,
+          isSystem: g.isSystem,
+          parentCategoryId: g.parentCategoryId,
+          parentCategoryName: `${category.name} / ${sub.name}`,
+          contactsCount: g._count.leads,
+          contactCount: g._count.leads,
+          lastUpdated: g.updatedAt,
+          updatedAt: g.updatedAt,
+          createdAt: g.createdAt,
+          sortOrder: g.sortOrder,
+        })),
+      );
+
       // Find all leads under this industry for unique count
       const allIndustryLeads = await this.prisma.lead.findMany({
         where: {
@@ -297,8 +323,8 @@ export class CategoriesService {
           uniqueContacts,
         },
         subcategories,
-        audienceGroups: [],
-        groups: [],
+        audienceGroups: allIndustryGroups,
+        groups: allIndustryGroups,
       };
     } else {
       // Subcategory detail: list its audience groups

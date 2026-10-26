@@ -98,7 +98,7 @@ export class MailboxesService {
         dailySendingLimit: dto.dailySendingLimit || 50,
         warmupDailyLimit: dto.warmupDailyLimit || 10,
         hourlyLimit: dto.hourlyLimit || 10,
-        minDelaySeconds: dto.minDelaySeconds || 90,
+        minDelaySeconds: dto.minDelaySeconds ?? 0,
         displayName: dto.displayName,
         senderName: dto.senderName,
         replyToEmail: dto.replyToEmail || null,

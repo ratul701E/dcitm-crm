@@ -184,23 +184,25 @@ export class CampaignSchedulerService {
           return;
         }
       } else {
-        const pacingDelaySeconds = (campaign as any).minimumDelaySeconds ?? (campaign as any).minDelaySeconds ?? 45;
-        const lastSentLog = await this.prisma.emailLog.findFirst({
-          where: {
-            campaignId: campaign.id,
-            status: { in: ['SENT', 'DELIVERED'] },
-          },
-          orderBy: { sentAt: 'desc' },
-          select: { sentAt: true },
-        });
+        const pacingDelaySeconds = (campaign as any).minimumDelaySeconds ?? (campaign as any).minDelaySeconds ?? 0;
+        if (pacingDelaySeconds > 0) {
+          const lastSentLog = await this.prisma.emailLog.findFirst({
+            where: {
+              campaignId: campaign.id,
+              status: { in: ['SENT', 'DELIVERED'] },
+            },
+            orderBy: { sentAt: 'desc' },
+            select: { sentAt: true },
+          });
 
-        if (lastSentLog?.sentAt) {
-          const elapsedSeconds = (now.getTime() - new Date(lastSentLog.sentAt).getTime()) / 1000;
-          if (elapsedSeconds < pacingDelaySeconds) {
-            this.logger.debug(
-              `Campaign "${campaign.title}" pacing: ${Math.round(elapsedSeconds)}s / ${pacingDelaySeconds}s`,
-            );
-            return;
+          if (lastSentLog?.sentAt) {
+            const elapsedSeconds = (now.getTime() - new Date(lastSentLog.sentAt).getTime()) / 1000;
+            if (elapsedSeconds < pacingDelaySeconds) {
+              this.logger.debug(
+                `Campaign "${campaign.title}" pacing: ${Math.round(elapsedSeconds)}s / ${pacingDelaySeconds}s`,
+              );
+              return;
+            }
           }
         }
       }

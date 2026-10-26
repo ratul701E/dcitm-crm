@@ -98,7 +98,7 @@ describe('Zod Schema DTO Validation', () => {
       expect(parsed.type).toBe(MailboxType.SMTP_IMAP);
       expect(parsed.dailySendingLimit).toBe(60);
       expect(parsed.warmupDailyLimit).toBe(10);
-      expect(parsed.minDelaySeconds).toBe(90);
+      expect(parsed.minDelaySeconds).toBe(0);
     });
   });
 

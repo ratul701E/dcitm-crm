@@ -179,7 +179,7 @@ model Mailbox {
   dailySendingLimit  Int          @default(50)
   warmupDailyLimit   Int          @default(10)
   sentCountToday     Int          @default(0)
-  minDelaySeconds    Int          @default(90)
+  minDelaySeconds    Int          @default(0)
   lastSentAt         DateTime?
   
   createdAt          DateTime     @default(now())

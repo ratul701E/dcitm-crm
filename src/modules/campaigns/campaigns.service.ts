@@ -74,7 +74,7 @@ export class CampaignsService {
    */
   async validateAudience(dto: ValidateAudienceDto) {
     const categoryListIds = await this.resolveCategoryLeadListIds(dto.categoryIds || []);
-    const directListIds = dto.leadListIds || [];
+    const directListIds = dto.listIds || dto.leadListIds || [];
     const allTargetedListIds = Array.from(new Set([...categoryListIds, ...directListIds]));
 
     const excludedIds = dto.excludedLeadListIds || [];
@@ -82,6 +82,13 @@ export class CampaignsService {
 
     if (validListIds.length === 0) {
       return {
+        rawTotal: 0,
+        dedupedCount: 0,
+        duplicateReductions: 0,
+        suppressedDeductions: 0,
+        finalDeliverableCount: 0,
+        breakdownBySource: [],
+
         recordsCount: 0,
         duplicatesRemoved: 0,
         unsubscribedExcluded: 0,
@@ -171,7 +178,20 @@ export class CampaignsService {
       eligibleLeads.push(lead);
     }
 
+    const rawTotal = recordsCount;
+    const duplicateReductions = duplicatesRemoved;
+    const suppressedDeductions = unsubscribedExcluded;
+    const finalDeliverableCount = eligibleLeads.length;
+    const dedupedCount = recordsCount - duplicatesRemoved;
+
     return {
+      rawTotal,
+      dedupedCount,
+      duplicateReductions,
+      suppressedDeductions,
+      finalDeliverableCount,
+      breakdownBySource: [],
+
       recordsCount,
       duplicatesRemoved,
       unsubscribedExcluded,

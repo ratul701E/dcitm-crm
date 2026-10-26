@@ -238,6 +238,7 @@ export class UpdateCampaignDto extends createZodDto(UpdateCampaignSchema) {}
 export const ValidateAudienceSchema = z.object({
   categoryIds: z.array(z.string()).default([]).optional(),
   leadListIds: z.array(z.string()).default([]).optional(),
+  listIds: z.array(z.string()).default([]).optional(),
   excludedLeadListIds: z.array(z.string()).default([]).optional(),
 });
 

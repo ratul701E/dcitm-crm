@@ -338,9 +338,10 @@ export class CampaignsService {
 
       // Attach lead lists if provided (only existing IDs)
       let validListIds: string[] = [];
-      if (dto.leadListIds && dto.leadListIds.length > 0) {
+      const targetedListIds = dto.leadListIds || (dto as any).listIds;
+      if (targetedListIds && targetedListIds.length > 0) {
         const validLeadLists = await tx.leadList.findMany({
-          where: { id: { in: dto.leadListIds } },
+          where: { id: { in: targetedListIds } },
           select: { id: true },
         });
         if (validLeadLists.length > 0) {
@@ -394,12 +395,12 @@ export class CampaignsService {
               sequenceStepId: step.id,
               variantKey: 'A',
               subject: p.subject,
-              body: p.emailBody,
+              body: p.emailBody || (p as any).body || (p as any).bodyContent || '',
               weight: 100,
             },
           });
         }
-      } else if (dto.subject || dto.emailBody) {
+      } else if (dto.subject || dto.emailBody || (dto as any).body) {
         // Fallback for legacy single-phase campaigns
         const step = await tx.sequenceStep.create({
           data: {
@@ -417,7 +418,7 @@ export class CampaignsService {
             sequenceStepId: step.id,
             variantKey: 'A',
             subject: dto.subject ?? '{{firstName}}, quick question',
-            body: dto.emailBody ?? '<p>Hi {{firstName}},</p><p>Wanted to reach out about {{company}}.</p><p>Best regards,<br/>{{senderName}}</p>',
+            body: dto.emailBody ?? (dto as any).body ?? '<p>Hi {{firstName}},</p><p>Wanted to reach out about {{company}}.</p><p>Best regards,<br/>{{senderName}}</p>',
             weight: 100,
           },
         });

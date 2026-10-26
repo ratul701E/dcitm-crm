@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -34,10 +35,51 @@ export class LeadsService {
       );
     }
 
+    // Validate parent category if provided
+    let parentCategoryId: string | null = null;
+    let sortOrder = dto.sortOrder ?? 0;
+
+    if (dto.parentCategoryId) {
+      const parent = await this.prisma.category.findUnique({
+        where: { id: dto.parentCategoryId },
+      });
+      if (!parent) {
+        throw new BadRequestException('Target parent category not found.');
+      }
+      if (parent.level !== 2) {
+        throw new BadRequestException('Audience groups can only be placed under a Level 2 Subcategory.');
+      }
+      parentCategoryId = parent.id;
+
+      if (dto.sortOrder === undefined) {
+        const maxSort = await this.prisma.leadList.findFirst({
+          where: { parentCategoryId: parent.id },
+          orderBy: { sortOrder: 'desc' },
+          select: { sortOrder: true },
+        });
+        sortOrder = (maxSort?.sortOrder ?? -1) + 1;
+      }
+    }
+
+    // Duplicate audience group name check within the same subcategory/container
+    const existingGroup = await this.prisma.leadList.findFirst({
+      where: {
+        parentCategoryId,
+        name: { equals: dto.name.trim(), mode: 'insensitive' },
+      },
+    });
+    if (existingGroup) {
+      throw new ConflictException(
+        `An audience group named "${dto.name.trim()}" already exists in this ${parentCategoryId ? 'subcategory' : 'list category'}.`,
+      );
+    }
+
     const list = await this.prisma.leadList.create({
       data: {
-        name: dto.name,
-        description: dto.description,
+        name: dto.name.trim(),
+        description: dto.description?.trim(),
+        parentCategoryId,
+        sortOrder,
         isSystem: false,
       },
     });

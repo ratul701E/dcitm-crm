@@ -42,6 +42,7 @@ export class CategoriesService {
             parentCategoryId: true,
             sortOrder: true,
             updatedAt: true,
+            createdAt: true,
             _count: {
               select: {
                 leads: {
@@ -66,6 +67,7 @@ export class CategoriesService {
         parentCategoryId: true,
         sortOrder: true,
         updatedAt: true,
+        createdAt: true,
         _count: {
           select: {
             leads: {
@@ -108,7 +110,9 @@ export class CategoriesService {
             parentCategoryId: g.parentCategoryId,
             sortOrder: g.sortOrder,
             contactsCount: g._count.leads,
+            contactCount: g._count.leads,
             updatedAt: g.updatedAt,
+            createdAt: g.createdAt,
           }));
 
           const subContactsCount = groups.reduce((acc, g) => acc + g.contactsCount, 0);
@@ -121,7 +125,9 @@ export class CategoriesService {
             level: 2,
             sortOrder: sub.sortOrder,
             groupsCount: groups.length,
+            groupCount: groups.length,
             contactsCount: subContactsCount,
+            contactCount: subContactsCount,
             groups,
           };
         });
@@ -137,7 +143,10 @@ export class CategoriesService {
         level: 1,
         sortOrder: ind.sortOrder,
         groupsCount: indGroupsCount,
+        totalGroups: indGroupsCount,
         contactsCount: indContactsCount,
+        totalContacts: indContactsCount,
+        totalSubcategories: childSubs.length,
         subcategories: childSubs,
       };
     });
@@ -150,28 +159,37 @@ export class CategoriesService {
       parentCategoryId: null,
       sortOrder: g.sortOrder,
       contactsCount: g._count.leads,
+      contactCount: g._count.leads,
       updatedAt: g.updatedAt,
+      createdAt: g.createdAt,
     }));
 
     const unassignedContactsCount = unassignedListRecords.reduce((acc, g) => acc + g.contactsCount, 0);
 
+    const statsObj = {
+      totalCategories: categories.length,
+      totalIndustries: industries.length,
+      totalSubcategories: subcategories.length,
+      totalGroups: totalAudienceGroups,
+      totalCategorizedGroups: totalAudienceGroups - unassignedGroups.length,
+      categorizedGroups: totalAudienceGroups - unassignedGroups.length,
+      totalUnassignedGroups: unassignedGroups.length,
+      unassignedGroups: unassignedGroups.length,
+      totalContacts: totalRecordsEnrolled,
+      uniqueContacts: uniqueEmailSet.size,
+      uniqueReachable: uniqueEmailSet.size,
+    };
+
     return {
-      summary: {
-        totalCategories: categories.length,
-        totalIndustries: industries.length,
-        totalSubcategories: subcategories.length,
-        totalGroups: totalAudienceGroups,
-        categorizedGroups: totalAudienceGroups - unassignedGroups.length,
-        unassignedGroups: unassignedGroups.length,
-        totalContacts: totalRecordsEnrolled,
-        uniqueReachable: uniqueEmailSet.size,
-      },
+      summary: statsObj,
+      stats: statsObj,
       tree,
       unassigned: {
         groupsCount: unassignedListRecords.length,
         contactsCount: unassignedContactsCount,
         groups: unassignedListRecords,
       },
+      unassignedLists: unassignedListRecords,
     };
   }
 
@@ -236,7 +254,9 @@ export class CategoriesService {
           name: sub.name,
           description: sub.description,
           groupsCount,
+          groupCount: groupsCount,
           contactsCount,
+          contactCount: contactsCount,
           sortOrder: sub.sortOrder,
         };
       });
@@ -272,11 +292,13 @@ export class CategoriesService {
         stats: {
           subcategoriesCount: subcategories.length,
           audienceGroupsCount: totalGroups,
+          groupCount: totalGroups,
           totalContacts,
           uniqueContacts,
         },
         subcategories,
         audienceGroups: [],
+        groups: [],
       };
     } else {
       // Subcategory detail: list its audience groups
@@ -289,7 +311,10 @@ export class CategoriesService {
           parentCategoryId: g.parentCategoryId,
           parentCategoryName: `${category.parent?.name || 'Industry'} / ${category.name}`,
           contactsCount: g.leads.length,
+          contactCount: g.leads.length,
           lastUpdated: g.updatedAt,
+          updatedAt: g.updatedAt,
+          createdAt: g.createdAt,
           sortOrder: g.sortOrder,
         };
       });
@@ -322,12 +347,14 @@ export class CategoriesService {
         stats: {
           subcategoriesCount: 0,
           audienceGroupsCount: groups.length,
+          groupCount: groups.length,
           totalContacts: totalRecords,
           uniqueContacts,
           multiGroupOverlap,
         },
         subcategories: [],
         audienceGroups: groups,
+        groups,
       };
     }
   }

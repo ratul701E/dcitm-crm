@@ -8,6 +8,17 @@ export const CreateLeadListSchema = z.object({
     .string()
     .optional()
     .describe('Description or campaign target context'),
+  parentCategoryId: z
+    .string()
+    .uuid()
+    .nullable()
+    .optional()
+    .describe('Parent Category UUID (must be Level 2 Subcategory or null for unassigned)'),
+  sortOrder: z
+    .number()
+    .int()
+    .optional()
+    .describe('Sort order within parent category'),
   leadIds: z
     .array(z.string())
     .optional()

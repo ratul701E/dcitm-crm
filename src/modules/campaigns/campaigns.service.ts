@@ -386,6 +386,7 @@ export class CampaignsService {
               stepOrder,
               delayDays: p.delayDays !== undefined ? p.delayDays : 0,
               delayHours: p.delayHours !== undefined ? p.delayHours : 0,
+              scheduledAt: p.scheduledAt ? new Date(p.scheduledAt) : null,
               status: 'ACTIVE',
               isArchived: false,
             },
@@ -946,6 +947,7 @@ export class CampaignsService {
               stepOrder: step.stepOrder,
               delayDays: step.delayDays,
               delayHours: step.delayHours,
+              scheduledAt: step.scheduledAt,
             },
           });
 
@@ -1283,6 +1285,7 @@ export class CampaignsService {
           body: primaryVariant?.body || '',
           delayDays: step.delayDays,
           delayHours: step.delayHours,
+          scheduledAt: step.scheduledAt?.toISOString() || null,
           status: phaseStatus,
           isArchived: step.isArchived,
           stats: {

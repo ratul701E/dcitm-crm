@@ -297,6 +297,11 @@ export class CampaignSchedulerService {
       const step = sequence.steps.find((s: any) => s.stepOrder === nextStepOrder);
       if (!step) continue;
 
+      // If step has a specific scheduledAt in the future, defer dispatch
+      if (step.scheduledAt && new Date(step.scheduledAt) > now) {
+        continue;
+      }
+
       // Check if this step is already pending/in-flight for this lead
       const stepLogsForThisStep = campaignLogs.filter(
         (l) => l.sequenceStep?.stepOrder === nextStepOrder,

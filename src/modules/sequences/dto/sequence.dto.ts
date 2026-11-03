@@ -36,6 +36,11 @@ export const CreateStepSchema = z
       .default(0)
       .optional()
       .describe('Wait duration in hours after previous step'),
+    scheduledAt: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Specific target ISO date and time when this step is sent'),
     subject: z.string().optional().describe('Email subject line (convenience shorthand for single variant)'),
     body: z.string().optional().describe('HTML email body (convenience shorthand for single variant)'),
     variants: z
@@ -63,6 +68,11 @@ export const UpdateStepSchema = z.object({
     .max(23)
     .optional()
     .describe('Wait duration in hours after previous step'),
+  scheduledAt: z
+    .string()
+    .nullable()
+    .optional()
+    .describe('Specific target ISO date and time when this step is sent'),
   status: z.string().optional().describe('Phase state (ACTIVE, PAUSED)'),
   subject: z.string().optional().describe('Updated subject line for primary variant'),
   body: z.string().optional().describe('Updated body for primary variant'),

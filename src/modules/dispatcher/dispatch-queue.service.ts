@@ -302,9 +302,11 @@ export class DispatchQueueService implements OnModuleInit, OnModuleDestroy {
 
       if (nextStep) {
         // Schedule next step delivery
-        const nextDate = new Date();
-        nextDate.setDate(nextDate.getDate() + nextStep.delayDays);
-        nextDate.setHours(nextDate.getHours() + nextStep.delayHours);
+        const nextDate = nextStep.scheduledAt ? new Date(nextStep.scheduledAt) : new Date();
+        if (!nextStep.scheduledAt) {
+          nextDate.setDate(nextDate.getDate() + nextStep.delayDays);
+          nextDate.setHours(nextDate.getHours() + nextStep.delayHours);
+        }
 
         // Update CampaignRecipient with next phase schedule
         await this.prisma.campaignRecipient.updateMany({

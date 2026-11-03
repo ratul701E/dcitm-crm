@@ -147,6 +147,18 @@ describe('Zod Schema DTO Validation', () => {
       };
       expect(() => CreateStepSchema.parse(payload)).toThrow();
     });
+
+    it('should validate step with scheduledAt datetime string', () => {
+      const futureDate = '2026-11-05T14:30:00.000Z';
+      const payload = {
+        stepOrder: 2,
+        scheduledAt: futureDate,
+        subject: 'Follow up',
+        body: '<p>Following up</p>',
+      };
+      const parsed = CreateStepSchema.parse(payload);
+      expect(parsed.scheduledAt).toBe(futureDate);
+    });
   });
 
   describe('Suppression & Unibox Schemas', () => {

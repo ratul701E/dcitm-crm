@@ -404,6 +404,7 @@ model SequenceStep {
   stepOrder   Int               // 1, 2, 3...
   delayDays   Int               @default(3)
   delayHours  Int               @default(0)
+  scheduledAt DateTime?
   status      String            @default("ACTIVE")
   isArchived  Boolean           @default(false)
   deletedAt   DateTime?

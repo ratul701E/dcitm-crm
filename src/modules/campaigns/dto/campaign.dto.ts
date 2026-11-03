@@ -133,6 +133,11 @@ export const CreateCampaignSchema = z
               .default(0)
               .optional()
               .describe('Delay in hours after previous phase'),
+            scheduledAt: z
+              .string()
+              .nullable()
+              .optional()
+              .describe('Specific target ISO date and time when this phase will be dispatched'),
             subject: z.string().min(1, 'Subject line is required'),
             emailBody: z.string().optional().describe('HTML email body for this phase'),
             body: z.string().optional().describe('Alias for emailBody'),

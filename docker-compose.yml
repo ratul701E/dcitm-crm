@@ -61,6 +61,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
+      BODY_LIMIT: ${BODY_LIMIT:-10mb}
       DB_HOST: postgres
       DB_PORT: 5432
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_secure_password_replace_in_prod}@postgres:5432/${POSTGRES_DB:-dcitm_crm}?schema=public}

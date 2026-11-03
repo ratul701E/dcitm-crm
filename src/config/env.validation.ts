@@ -7,7 +7,9 @@ export const envValidationSchema = Joi.object({
     .default('development'),
 
   // Database
-  DATABASE_URL: Joi.string().required().description('PostgreSQL connection string'),
+  DATABASE_URL: Joi.string()
+    .required()
+    .description('PostgreSQL connection string'),
 
   // Redis
   REDIS_HOST: Joi.string().default('localhost'),
@@ -21,6 +23,9 @@ export const envValidationSchema = Joi.object({
   JWT_ACCESS_EXPIRATION: Joi.string().default('15m'),
   JWT_REFRESH_SECRET: Joi.string().min(16).required(),
   JWT_REFRESH_EXPIRATION: Joi.string().default('7d'),
+
+  // Security & Request Limits
+  BODY_LIMIT: Joi.string().default('10mb').optional(),
 
   // Encryption Vault (AES-256-GCM requires 32 bytes = 64 hex chars or base64)
   ENCRYPTION_MASTER_KEY: Joi.string().min(32).required(),

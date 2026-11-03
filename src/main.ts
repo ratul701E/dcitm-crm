@@ -4,17 +4,21 @@ import { Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { ZodValidationPipe, cleanupOpenApiDoc } from 'nestjs-zod';
+import { json, urlencoded } from 'express';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ResponseTransformInterceptor } from './common/interceptors/response-transform.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   const logger = new Logger('Bootstrap');
   const configService = app.get(ConfigService);
 
   process.on('unhandledRejection', (reason: any) => {
-    logger.error(`Unhandled Promise Rejection: ${reason?.message || reason}`, reason?.stack);
+    logger.error(
+      `Unhandled Promise Rejection: ${reason?.message || reason}`,
+      reason?.stack,
+    );
   });
 
   // Support Chrome Private Network Access (PNA) for loopback calls from public tunnels
@@ -23,9 +27,17 @@ async function bootstrap() {
     next();
   });
 
+  // Body parser limits — increased to 10mb to accommodate large campaign payloads and rich HTML templates
+  const bodyLimit = configService.get<string>('BODY_LIMIT', '10mb');
+  app.use(json({ limit: bodyLimit }));
+  app.use(urlencoded({ extended: true, limit: bodyLimit }));
+
   // CORS — allow frontend dev servers (localhost on any port) and configured origins
   app.enableCors({
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       // Allow requests with no origin (server-to-server, curl, Swagger, mobile apps)
       if (!origin) return callback(null, true);
 
@@ -79,18 +91,54 @@ async function bootstrap() {
     )
     .setVersion('1.0.0')
     .addTag('System', 'Base application ping and root endpoints')
-    .addTag('Health & Readiness', 'Kubernetes liveness and readiness probe healthchecks')
-    .addTag('Authentication', 'Team member registration, JWT access/refresh token rotation, and revocation')
-    .addTag('Campaigns', 'Outreach campaign lifecycle, sending window configuration, and mailbox pools')
-    .addTag('Campaign Sequences & Steps', 'Multi-step email cadences with weighted multi-variant A/B copy')
-    .addTag('Domains', 'Sending domain management, tracking domain configuration, and DNS record audits')
-    .addTag('Mailboxes', 'SMTP/IMAP & OAuth mailbox onboarding, warm-up pacing, and connection state')
-    .addTag('Leads & Lists', 'Prospect lead lists, streaming CSV bulk imports, and metadata management')
-    .addTag('Lead Verification', 'Multi-provider single and batch email validation worker queues')
-    .addTag('Suppression & Compliance', 'Global suppression, manual DNC lists, and RFC 8058 one-click unsubscribes')
-    .addTag('Tracking Proxy', 'Transparent 1x1 open pixels and redirect proxy click tracking')
-    .addTag('Unibox (Unified Inbox)', 'Consolidated prospect replies, sentiment categorization, and RFC-threaded replies')
-    .addTag('Admin Audit Logs', 'System activity trails, security events, and administrative audit logs')
+    .addTag(
+      'Health & Readiness',
+      'Kubernetes liveness and readiness probe healthchecks',
+    )
+    .addTag(
+      'Authentication',
+      'Team member registration, JWT access/refresh token rotation, and revocation',
+    )
+    .addTag(
+      'Campaigns',
+      'Outreach campaign lifecycle, sending window configuration, and mailbox pools',
+    )
+    .addTag(
+      'Campaign Sequences & Steps',
+      'Multi-step email cadences with weighted multi-variant A/B copy',
+    )
+    .addTag(
+      'Domains',
+      'Sending domain management, tracking domain configuration, and DNS record audits',
+    )
+    .addTag(
+      'Mailboxes',
+      'SMTP/IMAP & OAuth mailbox onboarding, warm-up pacing, and connection state',
+    )
+    .addTag(
+      'Leads & Lists',
+      'Prospect lead lists, streaming CSV bulk imports, and metadata management',
+    )
+    .addTag(
+      'Lead Verification',
+      'Multi-provider single and batch email validation worker queues',
+    )
+    .addTag(
+      'Suppression & Compliance',
+      'Global suppression, manual DNC lists, and RFC 8058 one-click unsubscribes',
+    )
+    .addTag(
+      'Tracking Proxy',
+      'Transparent 1x1 open pixels and redirect proxy click tracking',
+    )
+    .addTag(
+      'Unibox (Unified Inbox)',
+      'Consolidated prospect replies, sentiment categorization, and RFC-threaded replies',
+    )
+    .addTag(
+      'Admin Audit Logs',
+      'System activity trails, security events, and administrative audit logs',
+    )
     .addBearerAuth(
       {
         type: 'http',
@@ -119,6 +167,8 @@ async function bootstrap() {
   const port = configService.get<number>('PORT', 3000);
   await app.listen(port);
   logger.log(`🚀 Application is running on: http://localhost:${port}/api`);
-  logger.log(`📚 Swagger documentation available at: http://localhost:${port}/api/docs`);
+  logger.log(
+    `📚 Swagger documentation available at: http://localhost:${port}/api/docs`,
+  );
 }
-bootstrap();
+void bootstrap();

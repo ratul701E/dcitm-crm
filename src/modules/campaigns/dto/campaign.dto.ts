@@ -4,6 +4,38 @@ import { CampaignStatus, DelayMode } from '@prisma/client';
 
 const timeFormatRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
 
+export const CampaignPhaseInputSchema = z
+  .object({
+    id: z.string().optional(),
+    title: z.string().optional().describe('Phase title (e.g. Phase 1: Initial Pitch)'),
+    stepOrder: z.number().int().min(1).optional().describe('Phase order index (1, 2, 3...)'),
+    delayDays: z.number().int().min(0).default(0).optional().describe('Delay in days after previous phase'),
+    delayHours: z
+      .number()
+      .int()
+      .min(0)
+      .max(23)
+      .default(0)
+      .optional()
+      .describe('Delay in hours after previous phase'),
+    scheduledAt: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Specific target ISO date and time when this phase will be dispatched'),
+    subject: z.string().min(1, 'Subject line is required'),
+    emailBody: z.string().optional().describe('HTML email body for this phase'),
+    body: z.string().optional().describe('Alias for emailBody'),
+    bodyContent: z.string().optional().describe('Alias for emailBody'),
+  })
+  .refine(
+    (p) => Boolean(p.emailBody || p.body || p.bodyContent),
+    {
+      message: 'Email body is required for each phase (provide emailBody or body)',
+      path: ['emailBody'],
+    },
+  );
+
 export const CreateCampaignSchema = z
   .object({
     title: z.string().min(1, 'Title is required').describe('Campaign title'),
@@ -92,6 +124,7 @@ export const CreateCampaignSchema = z
     excludedLeadListIds: z.array(z.string()).default([]).optional().describe('Excluded lead lists'),
     retryOnSoftBounce: z.boolean().default(true).optional().describe('Retry soft bounced emails'),
     unsubscribeLinkEnabled: z.boolean().default(true).optional().describe('Append unsubscribe footer'),
+    draftStep: z.number().int().min(1).max(7).default(1).optional().describe('Wizard draft progress step (1-7)'),
     status: z
       .nativeEnum(CampaignStatus)
       .default(CampaignStatus.DRAFT)
@@ -113,44 +146,11 @@ export const CreateCampaignSchema = z
       .array(z.string())
       .optional()
       .describe('Array of targeted Category (Industry or Subcategory) UUIDs'),
-    // Email content — persisted as sequence step + variant on creation (legacy single-phase support)
     subject: z.string().optional().describe('Email subject line for single-phase campaigns'),
     emailBody: z.string().optional().describe('HTML email body for single-phase campaigns'),
     body: z.string().optional().describe('Alias for emailBody'),
-    // Multi-phase email system support
     phases: z
-      .array(
-        z
-          .object({
-            title: z.string().optional().describe('Phase title (e.g. Phase 1: Initial Pitch)'),
-            stepOrder: z.number().int().min(1).optional().describe('Phase order index (1, 2, 3...)'),
-            delayDays: z.number().int().min(0).default(0).optional().describe('Delay in days after previous phase'),
-            delayHours: z
-              .number()
-              .int()
-              .min(0)
-              .max(23)
-              .default(0)
-              .optional()
-              .describe('Delay in hours after previous phase'),
-            scheduledAt: z
-              .string()
-              .nullable()
-              .optional()
-              .describe('Specific target ISO date and time when this phase will be dispatched'),
-            subject: z.string().min(1, 'Subject line is required'),
-            emailBody: z.string().optional().describe('HTML email body for this phase'),
-            body: z.string().optional().describe('Alias for emailBody'),
-            bodyContent: z.string().optional().describe('Alias for emailBody'),
-          })
-          .refine(
-            (p) => Boolean(p.emailBody || p.body || p.bodyContent),
-            {
-              message: 'Email body is required for each phase (provide emailBody or body)',
-              path: ['emailBody'],
-            },
-          ),
-      )
+      .array(CampaignPhaseInputSchema)
       .optional()
       .describe('Ordered campaign phases with dedicated email content and intervals'),
   })
@@ -187,6 +187,13 @@ export const UpdateCampaignSchema = z
       .nativeEnum(CampaignStatus)
       .optional()
       .describe('Campaign state'),
+    draftStep: z
+      .number()
+      .int()
+      .min(1)
+      .max(7)
+      .optional()
+      .describe('Wizard draft progress step (1-7)'),
     targetTimezone: z.string().optional().describe('Target IANA timezone'),
     dailyWindowStart: z
       .string()
@@ -235,6 +242,13 @@ export const UpdateCampaignSchema = z
       .array(z.string())
       .optional()
       .describe('Array of targeted Category (Industry or Subcategory) UUIDs'),
+    subject: z.string().optional().describe('Email subject line for single-phase campaigns'),
+    emailBody: z.string().optional().describe('HTML email body for single-phase campaigns'),
+    body: z.string().optional().describe('Alias for emailBody'),
+    phases: z
+      .array(CampaignPhaseInputSchema)
+      .optional()
+      .describe('Ordered campaign phases with dedicated email content and intervals'),
   })
   .refine(
     (data) => {

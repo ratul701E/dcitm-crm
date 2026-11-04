@@ -290,6 +290,7 @@ model Campaign {
   id               String           @id @default(uuid())
   title            String
   status           CampaignStatus   @default(DRAFT)
+  draftStep        Int              @default(1)
   campaignType     String           @default("outreach")
   tags             String[]         @default([])
   scheduledFor     DateTime?

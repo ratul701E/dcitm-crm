@@ -277,6 +277,7 @@ export class CampaignsService {
         data: {
           title: dto.title,
           status: dto.status || (dto.scheduledFor ? CampaignStatus.SCHEDULED : CampaignStatus.DRAFT),
+          draftStep: dto.draftStep || 1,
           targetTimezone: dto.targetTimezone || 'UTC',
           dailyWindowStart: dto.dailyWindowStart || '09:00',
           dailyWindowEnd: dto.dailyWindowEnd || '17:00',
@@ -710,6 +711,31 @@ export class CampaignsService {
     const current = await this.findOne(id);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (dto.status === CampaignStatus.ACTIVE || dto.status === CampaignStatus.SCHEDULED) {
+        // Pre-flight readiness validation when starting from draft
+        const mailboxesCount = dto.mailboxIds
+          ? dto.mailboxIds.length
+          : await tx.campaignMailbox.count({ where: { campaignId: id } });
+        if (mailboxesCount === 0) {
+          throw new BadRequestException('Cannot start campaign: At least one sender mailbox must be assigned.');
+        }
+
+        const recipientsCount = await tx.campaignRecipient.count({ where: { campaignId: id } });
+        const hasListSelection = (dto.leadListIds && dto.leadListIds.length > 0) || (dto.categoryIds && dto.categoryIds.length > 0);
+        if (recipientsCount === 0 && !hasListSelection) {
+          throw new BadRequestException('Cannot start campaign: At least one recipient list or category must be assigned.');
+        }
+
+        const stepsCount = (dto.phases && dto.phases.length > 0)
+          ? dto.phases.length
+          : await tx.sequenceStep.count({
+              where: { sequence: { campaignId: id }, isArchived: false },
+            });
+        if (stepsCount === 0 && !dto.subject && !dto.emailBody && !(dto as any).body) {
+          throw new BadRequestException('Cannot start campaign: At least one email phase/sequence step is required.');
+        }
+      }
+
       const minDelay = dto.minimumDelaySeconds !== undefined
         ? dto.minimumDelaySeconds
         : dto.minDelaySeconds;
@@ -719,6 +745,7 @@ export class CampaignsService {
         data: {
           title: dto.title,
           status: dto.status,
+          draftStep: dto.draftStep !== undefined ? dto.draftStep : undefined,
           targetTimezone: dto.targetTimezone,
           dailyWindowStart: dto.dailyWindowStart,
           dailyWindowEnd: dto.dailyWindowEnd,
@@ -826,6 +853,97 @@ export class CampaignsService {
             dto.excludedLeadListIds || current.excludedLeadListIds || [],
             currentCats.map((cc: any) => cc.categoryId),
           );
+        }
+      }
+
+      // Update sequences & steps if phases or email content provided
+      const hasEmailContentToUpdate =
+        (dto.phases && dto.phases.length > 0) ||
+        Boolean(dto.subject || dto.emailBody || (dto as any).body);
+
+      if (hasEmailContentToUpdate && tx.sequence) {
+        const logsCount = tx.emailLog?.count
+          ? await tx.emailLog.count({ where: { campaignId: id } })
+          : 0;
+
+        if (logsCount === 0) {
+          let sequence = tx.sequence.findFirst
+            ? await tx.sequence.findFirst({ where: { campaignId: id } })
+            : null;
+
+          if (!sequence && tx.sequence.create) {
+            sequence = await tx.sequence.create({
+              data: {
+                campaignId: id,
+                title: `${updated.title} Sequence`,
+              },
+            });
+          }
+
+          if (sequence) {
+            if (dto.phases && dto.phases.length > 0) {
+              if (tx.sequenceStep?.deleteMany) {
+                await tx.sequenceStep.deleteMany({ where: { sequenceId: sequence.id } });
+              }
+              for (let idx = 0; idx < dto.phases.length; idx++) {
+                const p = dto.phases[idx];
+                const stepOrder = p.stepOrder ?? idx + 1;
+                if (tx.sequenceStep?.create) {
+                  const step = await tx.sequenceStep.create({
+                    data: {
+                      sequenceId: sequence.id,
+                      title: p.title?.trim() || `Phase ${stepOrder}`,
+                      stepOrder,
+                      delayDays: p.delayDays !== undefined ? p.delayDays : 0,
+                      delayHours: p.delayHours !== undefined ? p.delayHours : 0,
+                      scheduledAt: p.scheduledAt ? new Date(p.scheduledAt) : null,
+                      status: 'ACTIVE',
+                      isArchived: false,
+                    },
+                  });
+                  if (tx.sequenceVariant?.create) {
+                    await tx.sequenceVariant.create({
+                      data: {
+                        sequenceStepId: step.id,
+                        variantKey: 'A',
+                        subject: p.subject,
+                        body: p.emailBody || (p as any).body || (p as any).bodyContent || '',
+                        weight: 100,
+                      },
+                    });
+                  }
+                }
+              }
+            } else if (dto.subject || dto.emailBody || (dto as any).body) {
+              if (tx.sequenceStep?.deleteMany) {
+                await tx.sequenceStep.deleteMany({ where: { sequenceId: sequence.id } });
+              }
+              if (tx.sequenceStep?.create) {
+                const step = await tx.sequenceStep.create({
+                  data: {
+                    sequenceId: sequence.id,
+                    title: 'Phase 1',
+                    stepOrder: 1,
+                    delayDays: 0,
+                    delayHours: 0,
+                    status: 'ACTIVE',
+                    isArchived: false,
+                  },
+                });
+                if (tx.sequenceVariant?.create) {
+                  await tx.sequenceVariant.create({
+                    data: {
+                      sequenceStepId: step.id,
+                      variantKey: 'A',
+                      subject: dto.subject ?? '{{firstName}}, quick question',
+                      body: dto.emailBody ?? (dto as any).body ?? '',
+                      weight: 100,
+                    },
+                  });
+                }
+              }
+            }
+          }
         }
       }
 

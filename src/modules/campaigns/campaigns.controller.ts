@@ -137,8 +137,8 @@ export class CampaignsController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Delete a campaign' })
+  @Roles(UserRole.ADMIN, UserRole.MEMBER)
+  @ApiOperation({ summary: 'Delete a campaign or draft' })
   @ApiParam({ name: 'id', description: 'Campaign UUID' })
   @ApiResponse({ status: 200, description: 'Campaign deleted successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - Admin role required' })

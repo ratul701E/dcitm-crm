@@ -69,6 +69,8 @@ async function bootstrap() {
       'Accept',
       'X-Requested-With',
       'Access-Control-Request-Private-Network',
+      'X-API-Key',
+      'x-api-key',
     ],
   });
 
@@ -139,6 +141,14 @@ async function bootstrap() {
       'Admin Audit Logs',
       'System activity trails, security events, and administrative audit logs',
     )
+    .addTag(
+      'API Keys',
+      'Programmatic access tokens and mailbox binding management for admins',
+    )
+    .addTag(
+      'External Email Dispatch',
+      'Send emails programmatically via verified CRM mailboxes using an API Key',
+    )
     .addBearerAuth(
       {
         type: 'http',
@@ -149,6 +159,15 @@ async function bootstrap() {
         in: 'header',
       },
       'JWT-auth',
+    )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+        description: 'Enter your programmatic API Key (e.g. crm_live_...)',
+      },
+      'api-key',
     )
     .build();
 

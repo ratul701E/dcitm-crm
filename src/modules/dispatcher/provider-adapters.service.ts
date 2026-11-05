@@ -11,6 +11,7 @@ export interface OutboundEmailPayload {
   html: string;
   text?: string;
   messageId: string;
+  replyTo?: string;
   inReplyTo?: string;
   references?: string;
   unsubscribeUrl?: string;
@@ -85,6 +86,7 @@ export class ProviderAdaptersService {
       subject: payload.subject,
       html: payload.html,
       text: payload.text,
+      replyTo: payload.replyTo,
       headers,
     });
 
@@ -124,6 +126,9 @@ export class ProviderAdaptersService {
       `Content-Type: text/html; charset=utf-8`,
     ];
 
+    if (payload.replyTo) {
+      emailLines.push(`Reply-To: ${payload.replyTo}`);
+    }
     if (payload.inReplyTo) {
       emailLines.push(`In-Reply-To: <${payload.inReplyTo}>`);
     }
@@ -182,6 +187,16 @@ export class ProviderAdaptersService {
         { name: 'Message-ID', value: `<${payload.messageId}>` },
       ],
     };
+
+    if (payload.replyTo) {
+      message.replyTo = [
+        {
+          emailAddress: {
+            address: payload.replyTo,
+          },
+        },
+      ];
+    }
 
     if (payload.inReplyTo) {
       message.internetMessageHeaders.push({

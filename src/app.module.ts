@@ -29,6 +29,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SearchModule } from './modules/search/search.module';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
     DashboardModule,
     SearchModule,
     CategoriesModule,
+    ApiKeysModule,
   ],
 })
 export class AppModule {}

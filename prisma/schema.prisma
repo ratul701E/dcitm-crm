@@ -118,6 +118,7 @@ model User {
   auditLogs          AuditLog[]
   campaignsCreated   Campaign[]
   categoriesCreated  Category[]
+  apiKeysCreated     ApiKey[]
 
   @@index([email])
 }
@@ -189,6 +190,8 @@ model Mailbox {
   emailLogs          EmailLog[]
   inboundReplies     InboundReply[]
   warmupPlan         WarmupPlan?
+  apiKeys            ApiKey[]
+  transactionalLogs  TransactionalEmailLog[]
 
   @@index([email])
   @@index([state])
@@ -562,4 +565,47 @@ model Segment {
 
   @@index([name])
 }
+
+model ApiKey {
+  id               String                 @id @default(uuid())
+  name             String
+  keyHash          String                 @unique
+  keyPrefix        String
+  mailboxId        String
+  mailbox          Mailbox                @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  createdById      String?
+  createdBy        User?                  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  isActive         Boolean                @default(true)
+  rateLimitPerHour Int                    @default(100)
+  lastUsedAt       DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  transactionalLogs TransactionalEmailLog[]
+
+  @@index([keyHash])
+  @@index([mailboxId])
+  @@index([isActive])
+}
+
+model TransactionalEmailLog {
+  id        String              @id @default(uuid())
+  apiKeyId  String?
+  apiKey    ApiKey?             @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  mailboxId String
+  mailbox   Mailbox             @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  messageId String?             @unique
+  to        String
+  subject   String
+  status    EmailDispatchStatus @default(SENT)
+  error     String?
+  sentAt    DateTime            @default(now())
+  createdAt DateTime            @default(now())
+
+  @@index([apiKeyId])
+  @@index([mailboxId])
+  @@index([sentAt])
+}
+
 

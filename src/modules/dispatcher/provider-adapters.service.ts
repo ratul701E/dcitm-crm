@@ -12,6 +12,8 @@ export interface OutboundEmailPayload {
   text?: string;
   messageId: string;
   replyTo?: string;
+  cc?: string | string[];
+  bcc?: string | string[];
   inReplyTo?: string;
   references?: string;
   unsubscribeUrl?: string;
@@ -83,6 +85,8 @@ export class ProviderAdaptersService {
     const info = await transporter.sendMail({
       from: payload.from,
       to: payload.to,
+      cc: payload.cc,
+      bcc: payload.bcc,
       subject: payload.subject,
       html: payload.html,
       text: payload.text,
@@ -128,6 +132,14 @@ export class ProviderAdaptersService {
 
     if (payload.replyTo) {
       emailLines.push(`Reply-To: ${payload.replyTo}`);
+    }
+    if (payload.cc) {
+      const ccStr = Array.isArray(payload.cc) ? payload.cc.join(', ') : payload.cc;
+      emailLines.push(`Cc: ${ccStr}`);
+    }
+    if (payload.bcc) {
+      const bccStr = Array.isArray(payload.bcc) ? payload.bcc.join(', ') : payload.bcc;
+      emailLines.push(`Bcc: ${bccStr}`);
     }
     if (payload.inReplyTo) {
       emailLines.push(`In-Reply-To: <${payload.inReplyTo}>`);
@@ -196,6 +208,20 @@ export class ProviderAdaptersService {
           },
         },
       ];
+    }
+
+    if (payload.cc) {
+      const ccList = Array.isArray(payload.cc) ? payload.cc : [payload.cc];
+      message.ccRecipients = ccList.map((addr) => ({
+        emailAddress: { address: addr },
+      }));
+    }
+
+    if (payload.bcc) {
+      const bccList = Array.isArray(payload.bcc) ? payload.bcc : [payload.bcc];
+      message.bccRecipients = bccList.map((addr) => ({
+        emailAddress: { address: addr },
+      }));
     }
 
     if (payload.inReplyTo) {

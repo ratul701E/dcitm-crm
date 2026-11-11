@@ -332,6 +332,8 @@ export class ApiKeysService {
         text: textBody,
         messageId,
         replyTo: dto.replyTo || mailbox.replyToEmail || undefined,
+        cc: dto.cc,
+        bcc: dto.bcc,
       });
     } catch (err: any) {
       await this.prisma.transactionalEmailLog.create({

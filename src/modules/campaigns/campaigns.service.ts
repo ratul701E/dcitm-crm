@@ -637,6 +637,12 @@ export class CampaignsService {
             openedAt: true,
             clickedAt: true,
             bounceReason: true,
+            inboundReplies: {
+              select: {
+                id: true,
+                receivedAt: true,
+              },
+            },
             mailbox: {
               select: {
                 id: true,
@@ -1199,6 +1205,14 @@ export class CampaignsService {
       where: { id },
       include: {
         campaignLeadLists: { select: { leadListId: true } },
+        sequences: {
+          include: {
+            steps: {
+              where: { isArchived: false },
+              orderBy: { stepOrder: 'asc' },
+            },
+          },
+        },
       },
     });
 
@@ -1244,27 +1258,57 @@ export class CampaignsService {
 
     const phaseSummary = await this.getPhaseStats(id).catch(() => ({ phases: [], activePhaseOrder: 1 }));
 
+    const totalPhases =
+      campaign.sequences?.[0]?.steps?.length ||
+      (this.prisma.sequence?.findFirst
+        ? (
+            await this.prisma.sequence.findFirst({
+              where: { campaignId: id },
+              include: {
+                steps: {
+                  where: { isArchived: false },
+                  orderBy: { stepOrder: 'asc' },
+                },
+              },
+            })
+          )?.steps?.length
+        : 1) ||
+      1;
+    const totalExpectedSends = totalRecipients * totalPhases;
+    const effectiveDelivered = Math.max(delivered, Math.max(0, sent - bounced));
+    const pendingSends = Math.max(0, totalExpectedSends - sent - bounced - failed);
+
+    const deliveryRate = sent > 0 ? Number(((effectiveDelivered / sent) * 100).toFixed(1)) : 0;
+    const openRate = effectiveDelivered > 0 ? Number(((opened / effectiveDelivered) * 100).toFixed(1)) : (sent > 0 ? Number(((opened / sent) * 100).toFixed(1)) : 0);
+    const clickRate = effectiveDelivered > 0 ? Number(((clicked / effectiveDelivered) * 100).toFixed(1)) : (sent > 0 ? Number(((clicked / sent) * 100).toFixed(1)) : 0);
+    const replyRate = sent > 0 ? Number(((replies / sent) * 100).toFixed(1)) : 0;
+    const bounceRate = sent > 0 ? Number(((bounced / sent) * 100).toFixed(1)) : 0;
+
     return {
       totalRecipients,
+      totalPhases,
+      totalExpectedSends,
       sent,
-      delivered,
+      delivered: effectiveDelivered,
       opened,
       clicked,
       replied: replies,
       bounced,
       failed,
       sentCount: sent,
-      deliveredCount: delivered,
+      deliveredCount: effectiveDelivered,
+      pendingSends,
       openCount: opened,
       clickCount: clicked,
       replyCount: replies,
       bounceCount: bounced,
       failedCount: failed,
       throttleStatus,
-      openRate: sent > 0 ? Number(((opened / sent) * 100).toFixed(1)) : 0,
-      clickRate: sent > 0 ? Number(((clicked / sent) * 100).toFixed(1)) : 0,
-      replyRate: sent > 0 ? Number(((replies / sent) * 100).toFixed(1)) : 0,
-      bounceRate: sent > 0 ? Number(((bounced / sent) * 100).toFixed(1)) : 0,
+      deliveryRate,
+      openRate,
+      clickRate,
+      replyRate,
+      bounceRate,
       phases: phaseSummary.phases,
       activePhaseOrder: phaseSummary.activePhaseOrder,
     };
@@ -1386,11 +1430,27 @@ export class CampaignsService {
           }),
         ]);
 
+        const effectiveDelivered = Math.max(delivered, Math.max(0, sent - bounced));
+        const deliveryRate = sent > 0 ? Number(((effectiveDelivered / sent) * 100).toFixed(1)) : 0;
+        const openRate = effectiveDelivered > 0 ? Number(((opened / effectiveDelivered) * 100).toFixed(1)) : (sent > 0 ? Number(((opened / sent) * 100).toFixed(1)) : 0);
+        const clickRate = effectiveDelivered > 0 ? Number(((clicked / effectiveDelivered) * 100).toFixed(1)) : (sent > 0 ? Number(((clicked / sent) * 100).toFixed(1)) : 0);
+        const replyRate = sent > 0 ? Number(((replied / sent) * 100).toFixed(1)) : 0;
+        const bounceRate = sent > 0 ? Number(((bounced / sent) * 100).toFixed(1)) : 0;
+
         let phaseStatus = 'UPCOMING';
+        const now = new Date();
+        const isScheduledFuture = step.scheduledAt && new Date(step.scheduledAt) > now;
+
         if (totalAudience > 0 && completedRecipients >= totalAudience) {
           phaseStatus = 'COMPLETED';
-        } else if (sent > 0 || inProgressRecipients > 0) {
+        } else if (sent > 0) {
           phaseStatus = 'ACTIVE';
+        } else if (inProgressRecipients > 0) {
+          phaseStatus = isScheduledFuture ? 'SCHEDULED' : 'ACTIVE';
+        } else if (isScheduledFuture) {
+          phaseStatus = 'SCHEDULED';
+        } else {
+          phaseStatus = 'UPCOMING';
         }
 
         const primaryVariant = step.variants[0];
@@ -1408,23 +1468,24 @@ export class CampaignsService {
           isArchived: step.isArchived,
           stats: {
             sent,
-            delivered,
+            delivered: effectiveDelivered,
             opened,
             clicked,
             replied,
             bounced,
             failed,
             sentCount: sent,
-            deliveredCount: delivered,
+            deliveredCount: effectiveDelivered,
             openCount: opened,
             clickCount: clicked,
             replyCount: replied,
             bounceCount: bounced,
             failedCount: failed,
-            openRate: sent > 0 ? Number(((opened / sent) * 100).toFixed(1)) : 0,
-            clickRate: sent > 0 ? Number(((clicked / sent) * 100).toFixed(1)) : 0,
-            replyRate: sent > 0 ? Number(((replied / sent) * 100).toFixed(1)) : 0,
-            bounceRate: sent > 0 ? Number(((bounced / sent) * 100).toFixed(1)) : 0,
+            deliveryRate,
+            openRate,
+            clickRate,
+            replyRate,
+            bounceRate,
           },
           participantProgress: {
             totalAudience,
@@ -1439,6 +1500,7 @@ export class CampaignsService {
 
     const activePhase =
       phaseStats.find((p) => p.status === 'ACTIVE') ||
+      phaseStats.find((p) => p.status === 'SCHEDULED') ||
       phaseStats.find((p) => p.status === 'UPCOMING') ||
       phaseStats[phaseStats.length - 1] ||
       null;

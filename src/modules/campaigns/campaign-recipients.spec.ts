@@ -48,6 +48,7 @@ describe('Campaign Recipient Snapshot & Immutability', () => {
     },
     sequence: {
       create: jest.fn().mockResolvedValue({ id: 'seq-1' }),
+      findFirst: jest.fn().mockResolvedValue({ id: 'seq-1', steps: [{ id: 'step-1', stepOrder: 1 }] }),
     },
     sequenceStep: {
       create: jest.fn().mockResolvedValue({ id: 'step-1' }),
@@ -167,5 +168,49 @@ describe('Campaign Recipient Snapshot & Immutability', () => {
 
     // Verify campaignRecipient.deleteMany was NOT called
     expect(mockPrisma.campaignRecipient.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('4. Computes totalExpectedSends, pendingSends, and deliveryRate accurately for multi-phase campaigns', async () => {
+    mockPrisma.campaign.findUnique.mockResolvedValue({
+      id: 'camp-multi',
+      title: 'Multi-Phase Campaign',
+      status: CampaignStatus.ACTIVE,
+      campaignLeadLists: [{ leadListId: 'group-xyz' }],
+      sequences: [
+        {
+          steps: [
+            { id: 's1', stepOrder: 1, isArchived: false },
+            { id: 's2', stepOrder: 2, isArchived: false },
+          ],
+        },
+      ],
+    });
+
+    // 10 recipients total, 2 phases -> 20 expected sends
+    mockPrisma.campaignRecipient.count.mockResolvedValue(10);
+    // 10 emails sent so far (phase 1 finished)
+    mockPrisma.emailLog.count.mockImplementation(({ where }: any) => {
+      if (where.status?.in) return Promise.resolve(10); // sent
+      if (where.status === 'DELIVERED') return Promise.resolve(0); // raw DELIVERED status from SMTP is 0
+      if (where.status === 'BOUNCED') return Promise.resolve(1);
+      if (where.status === 'FAILED') return Promise.resolve(0);
+      if (where.openCount) return Promise.resolve(4);
+      return Promise.resolve(0);
+    });
+
+    const stats = await service.getStats('camp-multi');
+
+    expect(stats.totalRecipients).toBe(10);
+    expect(stats.totalPhases).toBe(2);
+    expect(stats.totalExpectedSends).toBe(20);
+    expect(stats.sentCount).toBe(10);
+    // Effective delivered = sent (10) - bounced (1) = 9
+    expect(stats.deliveredCount).toBe(9);
+    // Pending sends = 20 - 10 - 1 = 9
+    expect(stats.pendingSends).toBe(9);
+    // Open rate = 4 / 9 = 44.4%
+    expect(stats.openRate).toBe(44.4);
+    // Delivery rate = 9 / 10 = 90%
+    expect(stats.deliveryRate).toBe(90);
   });
 });
